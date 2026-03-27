@@ -2,6 +2,8 @@ const { SlashCommandBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { sendLog } = require('../logger');
 const { getRatingsRows, normalizeName } = require('../sheets');
+const { mosConfig } = require('../mosConfig');
+const { updateNickname } = require('../utils/updateNickname');
 
 const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
@@ -12,6 +14,8 @@ const RATINGS_SPREADSHEET_ID = (
   process.env.TRAINEE_SPREADSHEET_ID ||
   ''
 ).trim();
+
+const COMMUNITY_ROLE_ID = process.env.COMMUNITY_MEMBER_ID;
 
 function isValidDiscordId(value) {
   return /^\d{17,20}$/.test(String(value || '').trim());
@@ -110,10 +114,31 @@ async function findRatingsRowsByName(name) {
   return matches;
 }
 
+function getAllMosRoleIds() {
+  const mosRoleIds = new Set();
+
+  for (const mos of Object.values(mosConfig)) {
+    for (const roleId of Object.values(mos.ratings)) {
+      if (roleId) {
+        mosRoleIds.add(roleId);
+      }
+    }
+  }
+
+  return [...mosRoleIds];
+}
+
+function getConfiguredRoleIds(envKey) {
+  return (process.env[envKey] || '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean);
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('removeratings')
-    .setDescription('Remove a member from the Ratings sheet.')
+    .setDescription('Remove a member from the Ratings sheet and reset their Skira roles.')
     .addUserOption(option =>
       option
         .setName('user')
@@ -137,6 +162,13 @@ module.exports = {
       if (HQ_CHANNEL_ID && interaction.channelId !== HQ_CHANNEL_ID) {
         return interaction.editReply({
           content: 'This command can only be used in Headquarters.',
+          allowedMentions: { users: [] },
+        });
+      }
+
+      if (!COMMUNITY_ROLE_ID) {
+        return interaction.editReply({
+          content: 'COMMUNITY_MEMBER_ID is missing in the environment variables.',
           allowedMentions: { users: [] },
         });
       }
@@ -176,7 +208,6 @@ module.exports = {
         }
       }
 
-      // Safe fallback: if a user is provided but row has no Discord ID yet, try a unique name match
       if (!foundRow && targetUser) {
         let member = null;
 
@@ -216,6 +247,62 @@ module.exports = {
       const ratingsName = row[2] || 'Unknown';
       const ratingsDiscordId = (row[18] || targetUser?.id || discordIdInput || '').toString().trim() || 'Unknown';
 
+      const rankRoleIds = getConfiguredRoleIds('RANK_ROLE_IDS');
+      const breakerRoleIds = getConfiguredRoleIds('BREAKER_ROLE_IDS');
+      const squadronRoleIds = getConfiguredRoleIds('SQUADRON_ROLE_IDS');
+      const mosRoleIds = getAllMosRoleIds();
+
+      const allRemovableRoleIds = [
+        ...new Set([
+          ...rankRoleIds,
+          ...breakerRoleIds,
+          ...squadronRoleIds,
+          ...mosRoleIds,
+        ]),
+      ].filter(roleId => roleId !== COMMUNITY_ROLE_ID);
+
+      let member = null;
+      let rolesRemoved = [];
+      let communityAdded = false;
+      let nicknameReset = false;
+      let stillInServer = false;
+
+      try {
+        member = await interaction.guild.members.fetch(ratingsDiscordId);
+        stillInServer = true;
+      } catch {
+        member = null;
+      }
+
+      if (member) {
+        rolesRemoved = allRemovableRoleIds.filter(roleId => member.roles.cache.has(roleId));
+
+        if (rolesRemoved.length > 0) {
+          await member.roles.remove(
+            rolesRemoved,
+            `Removed via /removeratings by ${interaction.user.tag}`
+          );
+        }
+
+        if (!member.roles.cache.has(COMMUNITY_ROLE_ID)) {
+          await member.roles.add(
+            COMMUNITY_ROLE_ID,
+            `Community role added via /removeratings by ${interaction.user.tag}`
+          );
+          communityAdded = true;
+        }
+
+        try {
+          await updateNickname(member, {
+            prefix: null,
+            exSkira: false,
+          });
+          nicknameReset = true;
+        } catch {
+          nicknameReset = false;
+        }
+      }
+
       await deleteRatingsRow(foundRow.rowNumber);
 
       await sendLog(
@@ -230,6 +317,10 @@ module.exports = {
           `Squadron: ${ratingsSquadron}`,
           `Name: ${ratingsName}`,
           `Discord ID: ${ratingsDiscordId}`,
+          `Still In Server: ${stillInServer ? 'Yes' : 'No'}`,
+          `Roles Removed: ${rolesRemoved.length > 0 ? rolesRemoved.join(', ') : 'None'}`,
+          `Community Role Added: ${communityAdded ? 'Yes' : 'No'}`,
+          `Nickname Reset: ${nicknameReset ? 'Yes' : 'No'}`,
         ].join('\n')
       );
 
@@ -240,7 +331,11 @@ module.exports = {
           `Deleted row: **${foundRow.rowNumber}**\n` +
           `Rank: **${ratingsRank}**\n` +
           `Squadron: **${ratingsSquadron}**\n` +
-          `Discord ID: \`${ratingsDiscordId}\``,
+          `Discord ID: \`${ratingsDiscordId}\`\n` +
+          `Still in server: **${stillInServer ? 'Yes' : 'No'}**\n` +
+          `Roles removed: **${rolesRemoved.length > 0 ? 'Yes' : 'No'}**\n` +
+          `Community role added: **${communityAdded ? 'Yes' : 'No'}**\n` +
+          `Nickname reset: **${nicknameReset ? 'Yes' : 'No'}**`,
         allowedMentions: { users: [] },
       });
     } catch (error) {
