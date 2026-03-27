@@ -1,4 +1,9 @@
-const { SlashCommandBuilder } = require('discord.js');
+const {
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require('discord.js');
 const { google } = require('googleapis');
 const { sendLog } = require('../logger');
 const { getRatingsRows, normalizeName } = require('../sheets');
@@ -150,13 +155,6 @@ module.exports = {
         .setName('discord_id')
         .setDescription('Discord ID to remove from the Ratings sheet')
         .setRequired(false)
-    )
-    .addStringOption(option =>
-      option
-        .setName('confirm')
-        .setDescription('Type YES to confirm this removal')
-        .setRequired(true)
-        .addChoices({ name: 'YES', value: 'YES' })
     ),
 
   async execute(interaction) {
@@ -176,14 +174,6 @@ module.exports = {
       if (!COMMUNITY_ROLE_ID) {
         return interaction.editReply({
           content: 'COMMUNITY_MEMBER_ID is missing in the environment variables.',
-          allowedMentions: { users: [] },
-        });
-      }
-
-      const confirm = interaction.options.getString('confirm');
-      if (confirm !== 'YES') {
-        return interaction.editReply({
-          content: 'Removal cancelled. You must set confirm to YES.',
           allowedMentions: { users: [] },
         });
       }
@@ -277,9 +267,7 @@ module.exports = {
       ].filter(roleId => roleId !== COMMUNITY_ROLE_ID);
 
       let member = null;
-      let rolesRemoved = [];
-      let communityAdded = false;
-      let nicknameReset = false;
+      let rolesToRemove = [];
       let stillInServer = false;
 
       try {
@@ -290,7 +278,72 @@ module.exports = {
       }
 
       if (member) {
-        rolesRemoved = allRemovableRoleIds.filter(roleId => member.roles.cache.has(roleId));
+        rolesToRemove = allRemovableRoleIds.filter(roleId => member.roles.cache.has(roleId));
+      }
+
+      const preview =
+        `Are you sure you want to remove **${ratingsName}** from the Ratings system?\n\n` +
+        `Matched by: **${matchedBy || 'Unknown'}**\n` +
+        `Row: **${foundRow.rowNumber}**\n` +
+        `Rank: **${ratingsRank}**\n` +
+        `Squadron: **${ratingsSquadron}**\n` +
+        `Discord ID: \`${ratingsDiscordId}\`\n` +
+        `Still in server: **${stillInServer ? 'Yes' : 'No'}**\n` +
+        `Roles to remove: **${rolesToRemove.length}**\n` +
+        `Community role to add: **Yes**\n` +
+        `Nickname reset: **${stillInServer ? 'Yes (attempted)' : 'No'}**`;
+
+      const rowButtons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`removeratings_confirm_${interaction.id}`)
+          .setLabel('Confirm')
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(`removeratings_cancel_${interaction.id}`)
+          .setLabel('Cancel')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      await interaction.editReply({
+        content: preview,
+        components: [rowButtons],
+        allowedMentions: { users: [] },
+      });
+
+      const message = await interaction.fetchReply();
+
+      const buttonInteraction = await message.awaitMessageComponent({
+        filter: i =>
+          i.user.id === interaction.user.id &&
+          (i.customId === `removeratings_confirm_${interaction.id}` ||
+            i.customId === `removeratings_cancel_${interaction.id}`),
+        time: 60000,
+      }).catch(() => null);
+
+      if (!buttonInteraction) {
+        await interaction.editReply({
+          content: `${preview}\n\n⏳ Timed out. No changes were made.`,
+          components: [],
+          allowedMentions: { users: [] },
+        });
+        return;
+      }
+
+      if (buttonInteraction.customId === `removeratings_cancel_${interaction.id}`) {
+        await buttonInteraction.update({
+          content: `${preview}\n\n✅ Cancelled. No changes were made.`,
+          components: [],
+          allowedMentions: { users: [] },
+        });
+        return;
+      }
+
+      let rolesRemoved = [];
+      let communityAdded = false;
+      let nicknameReset = false;
+
+      if (member) {
+        rolesRemoved = rolesToRemove;
 
         if (rolesRemoved.length > 0) {
           await member.roles.remove(
@@ -339,7 +392,7 @@ module.exports = {
         ].join('\n')
       );
 
-      return interaction.editReply({
+      await buttonInteraction.update({
         content:
           `Removed **${ratingsName}** from the Ratings system.\n` +
           `Matched by: **${matchedBy || 'Unknown'}**\n` +
@@ -351,6 +404,7 @@ module.exports = {
           `Roles removed: **${rolesRemoved.length > 0 ? 'Yes' : 'No'}**\n` +
           `Community role added: **${communityAdded ? 'Yes' : 'No'}**\n` +
           `Nickname reset: **${nicknameReset ? 'Yes' : 'No'}**`,
+        components: [],
         allowedMentions: { users: [] },
       });
     } catch (error) {
@@ -358,6 +412,7 @@ module.exports = {
 
       return interaction.editReply({
         content: '❌ There was an error while running /removeratings.',
+        components: [],
         allowedMentions: { users: [] },
       });
     }

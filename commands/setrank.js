@@ -22,7 +22,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: null,
     exSkiraSuffix: true,
-    requireConfirm: true,
   },
   TRAINEE: {
     label: 'Trainee',
@@ -33,7 +32,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'TR',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
 
   PRIVATE: {
@@ -45,7 +43,6 @@ const rankConfig = {
     autoInfantryFromTrainee: true,
     nicknamePrefix: 'PVT',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
   ARMOUR_CADET: {
     label: 'Armour Cadet',
@@ -56,7 +53,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'CDT',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
   OFFICER_CADET: {
     label: 'Officer Cadet',
@@ -67,7 +63,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'O/CDT',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
   ARMOUR_TROOPER: {
     label: 'Armour Trooper',
@@ -78,7 +73,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'TPR',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
   PILOT_OFFICER: {
     label: 'Pilot Officer',
@@ -89,7 +83,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'P/O',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
   LANCE_CORPORAL: {
     label: 'Lance Corporal',
@@ -100,7 +93,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'LCPL',
     exSkiraSuffix: false,
-    requireConfirm: false,
   },
 
   FLYING_OFFICER: {
@@ -112,7 +104,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'F/O',
     exSkiraSuffix: false,
-    requireConfirm: true,
   },
   CORPORAL: {
     label: 'Corporal',
@@ -123,7 +114,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'CPL',
     exSkiraSuffix: false,
-    requireConfirm: true,
   },
 
   SERGEANT: {
@@ -135,7 +125,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'SGT',
     exSkiraSuffix: false,
-    requireConfirm: true,
   },
   STAFF_SERGEANT: {
     label: 'Staff Sergeant',
@@ -146,7 +135,6 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'SSGT',
     exSkiraSuffix: false,
-    requireConfirm: true,
   },
 };
 
@@ -190,12 +178,6 @@ module.exports = {
           { name: 'Sergeant', value: 'SERGEANT' },
           { name: 'Staff Sergeant', value: 'STAFF_SERGEANT' }
         )
-    )
-    .addStringOption(option =>
-      option.setName('confirm')
-        .setDescription('Required for higher-impact rank changes')
-        .setRequired(false)
-        .addChoices({ name: 'YES', value: 'YES' })
     ),
 
   async execute(interaction) {
@@ -215,21 +197,12 @@ module.exports = {
 
       const user = interaction.options.getUser('user');
       const rankKey = interaction.options.getString('rank');
-      const confirm = interaction.options.getString('confirm');
       let member = await interaction.guild.members.fetch(user.id);
 
       const selectedRank = rankConfig[rankKey];
       if (!selectedRank) {
         await interaction.editReply({
           content: '❌ That rank is not configured.',
-          allowedMentions: { users: [] },
-        });
-        return;
-      }
-
-      if (selectedRank.requireConfirm && confirm !== 'YES') {
-        await interaction.editReply({
-          content: `❌ Setting rank to **${selectedRank.label}** requires confirm = YES.`,
           allowedMentions: { users: [] },
         });
         return;
@@ -470,7 +443,7 @@ module.exports = {
       }
 
       if (autoAssignedInfantry) {
-        replyMessage += ` Infantry was auto-assigned because they were promoted from trainee.`;
+        replyMessage += ' Infantry was auto-assigned because they were promoted from trainee.';
       }
 
       let traineeRowRemoved = false;
