@@ -22,6 +22,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: null,
     exSkiraSuffix: true,
+    requireConfirm: true,
   },
   TRAINEE: {
     label: 'Trainee',
@@ -32,6 +33,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'TR',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
 
   PRIVATE: {
@@ -43,6 +45,7 @@ const rankConfig = {
     autoInfantryFromTrainee: true,
     nicknamePrefix: 'PVT',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
   ARMOUR_CADET: {
     label: 'Armour Cadet',
@@ -53,6 +56,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'CDT',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
   OFFICER_CADET: {
     label: 'Officer Cadet',
@@ -63,6 +67,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'O/CDT',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
   ARMOUR_TROOPER: {
     label: 'Armour Trooper',
@@ -73,6 +78,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'TPR',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
   PILOT_OFFICER: {
     label: 'Pilot Officer',
@@ -83,6 +89,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'P/O',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
   LANCE_CORPORAL: {
     label: 'Lance Corporal',
@@ -93,6 +100,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'LCPL',
     exSkiraSuffix: false,
+    requireConfirm: false,
   },
 
   FLYING_OFFICER: {
@@ -104,6 +112,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'F/O',
     exSkiraSuffix: false,
+    requireConfirm: true,
   },
   CORPORAL: {
     label: 'Corporal',
@@ -114,6 +123,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'CPL',
     exSkiraSuffix: false,
+    requireConfirm: true,
   },
 
   SERGEANT: {
@@ -125,6 +135,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'SGT',
     exSkiraSuffix: false,
+    requireConfirm: true,
   },
   STAFF_SERGEANT: {
     label: 'Staff Sergeant',
@@ -135,6 +146,7 @@ const rankConfig = {
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'SSGT',
     exSkiraSuffix: false,
+    requireConfirm: true,
   },
 };
 
@@ -154,7 +166,7 @@ function getSheetSquadronName(member) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setrank')
-    .setDescription('Set a user rank role')
+    .setDescription('Set a user rank role and sync them to the system.')
     .addUserOption(option =>
       option.setName('user')
         .setDescription('User to update')
@@ -178,6 +190,12 @@ module.exports = {
           { name: 'Sergeant', value: 'SERGEANT' },
           { name: 'Staff Sergeant', value: 'STAFF_SERGEANT' }
         )
+    )
+    .addStringOption(option =>
+      option.setName('confirm')
+        .setDescription('Required for higher-impact rank changes')
+        .setRequired(false)
+        .addChoices({ name: 'YES', value: 'YES' })
     ),
 
   async execute(interaction) {
@@ -197,12 +215,21 @@ module.exports = {
 
       const user = interaction.options.getUser('user');
       const rankKey = interaction.options.getString('rank');
+      const confirm = interaction.options.getString('confirm');
       let member = await interaction.guild.members.fetch(user.id);
 
       const selectedRank = rankConfig[rankKey];
       if (!selectedRank) {
         await interaction.editReply({
           content: '❌ That rank is not configured.',
+          allowedMentions: { users: [] },
+        });
+        return;
+      }
+
+      if (selectedRank.requireConfirm && confirm !== 'YES') {
+        await interaction.editReply({
+          content: `❌ Setting rank to **${selectedRank.label}** requires confirm = YES.`,
           allowedMentions: { users: [] },
         });
         return;
@@ -216,6 +243,14 @@ module.exports = {
       if (!targetRankRoleId) {
         await interaction.editReply({
           content: `❌ Missing ${selectedRank.roleEnv} in .env`,
+          allowedMentions: { users: [] },
+        });
+        return;
+      }
+
+      if (member.roles.cache.has(targetRankRoleId)) {
+        await interaction.editReply({
+          content: `<@${user.id}> already has rank **${selectedRank.label}**.`,
           allowedMentions: { users: [] },
         });
         return;
@@ -323,6 +358,7 @@ module.exports = {
             `**Breaker Added:** None`,
             `**Squadron Added:** None`,
             `**Ratings Sheet Updated:** No`,
+            `**Trainee Row Found:** ${traineeRow ? 'Yes' : 'No'}`,
             `**Trainee Row Removed:** No`,
             `**Done By:** ${interaction.user.tag}`,
             `**Channel:** <#${interaction.channelId}>`,
@@ -337,6 +373,7 @@ module.exports = {
       });
 
       let squadronRoleToAdd = null;
+      let autoAssignedInfantry = false;
 
       if (selectedRank.autoInfantryFromTrainee && wasCurrentlyTrainee) {
         if (!infantryRoleId) {
@@ -348,6 +385,7 @@ module.exports = {
         }
 
         squadronRoleToAdd = infantryRoleId;
+        autoAssignedInfantry = true;
       } else {
         if (selectedRank.allowedSquadrons.length > 0 && !currentSquadronEnv) {
           await interaction.editReply({
@@ -431,6 +469,10 @@ module.exports = {
         }
       }
 
+      if (autoAssignedInfantry) {
+        replyMessage += ` Infantry was auto-assigned because they were promoted from trainee.`;
+      }
+
       let traineeRowRemoved = false;
       if (wasCurrentlyTrainee && traineeRow) {
         await deleteTraineeRow(traineeRow.rowNumber);
@@ -492,9 +534,11 @@ module.exports = {
           `**New Rank:** ${selectedRank.label}`,
           `**Breaker Added:** ${breakerName}`,
           `**Squadron Added:** ${squadronName || 'None'}`,
+          `**Auto Assigned Infantry:** ${autoAssignedInfantry ? 'Yes' : 'No'}`,
           `**Ratings Sheet Name:** ${RATINGS_SHEET_NAME}`,
           `**Ratings Row:** ${ratingsRow.rowNumber}`,
           `**Ratings Row Created:** ${createdRatingsRow ? 'Yes' : 'No'}`,
+          `**Trainee Row Found:** ${traineeRow ? 'Yes' : 'No'}`,
           `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
           `**Done By:** ${interaction.user.tag}`,
           `**Channel:** <#${interaction.channelId}>`,

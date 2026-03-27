@@ -138,7 +138,7 @@ function getConfiguredRoleIds(envKey) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('removeratings')
-    .setDescription('Remove a member from the Ratings sheet and reset their Skira roles.')
+    .setDescription('Remove a member from the Ratings system and reset their roles.')
     .addUserOption(option =>
       option
         .setName('user')
@@ -150,6 +150,13 @@ module.exports = {
         .setName('discord_id')
         .setDescription('Discord ID to remove from the Ratings sheet')
         .setRequired(false)
+    )
+    .addStringOption(option =>
+      option
+        .setName('confirm')
+        .setDescription('Type YES to confirm this removal')
+        .setRequired(true)
+        .addChoices({ name: 'YES', value: 'YES' })
     ),
 
   async execute(interaction) {
@@ -169,6 +176,14 @@ module.exports = {
       if (!COMMUNITY_ROLE_ID) {
         return interaction.editReply({
           content: 'COMMUNITY_MEMBER_ID is missing in the environment variables.',
+          allowedMentions: { users: [] },
+        });
+      }
+
+      const confirm = interaction.options.getString('confirm');
+      if (confirm !== 'YES') {
+        return interaction.editReply({
+          content: 'Removal cancelled. You must set confirm to YES.',
           allowedMentions: { users: [] },
         });
       }
@@ -326,7 +341,7 @@ module.exports = {
 
       return interaction.editReply({
         content:
-          `Removed **${ratingsName}** from the Ratings sheet.\n` +
+          `Removed **${ratingsName}** from the Ratings system.\n` +
           `Matched by: **${matchedBy || 'Unknown'}**\n` +
           `Deleted row: **${foundRow.rowNumber}**\n` +
           `Rank: **${ratingsRank}**\n` +
