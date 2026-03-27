@@ -75,6 +75,42 @@ function truncateList(items, limit = 10) {
   return [...items.slice(0, limit), `...and ${items.length - limit} more`];
 }
 
+function isMeaningfulTraineeRow(row) {
+  if (!row || !Array.isArray(row)) return false;
+
+  const name = (row[0] || '').toString().trim();
+  const enlisted = (row[1] || '').toString().trim();
+  const wl = (row[2] || '').toString().trim();
+  const steamId64 = (row[3] || '').toString().trim();
+  const bm = (row[4] || '').toString().trim();
+  const lastSeen = (row[5] || '').toString().trim();
+  const score = (row[6] || '').toString().trim();
+  const notes = (row[7] || '').toString().trim();
+  const discordId = (row[8] || '').toString().trim();
+
+  const hasAnyUsefulData =
+    name || enlisted || wl || steamId64 || bm || lastSeen || score || notes || discordId;
+
+  if (!hasAnyUsefulData) return false;
+
+  const normalizedName = name.toLowerCase();
+  const normalizedEnlisted = enlisted.toLowerCase();
+  const normalizedSteam = steamId64.toLowerCase();
+  const normalizedNotes = notes.toLowerCase();
+
+  const looksLikeTemplate =
+    normalizedName === 'name' &&
+    normalizedEnlisted === 'dd/mm/yyyy' &&
+    normalizedSteam === 'steamid64' &&
+    normalizedNotes === 'notes';
+
+  if (looksLikeTemplate) return false;
+
+  if (!name && !steamId64 && !discordId) return false;
+
+  return true;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('auditmembers')
@@ -95,7 +131,6 @@ module.exports = {
         });
       }
 
-      // IMPORTANT: use current cache only, do NOT fetch entire guild
       const allMembers = interaction.guild.members.cache.filter(member => !member.user.bot);
 
       const traineeRows = await getTraineeRows();
@@ -106,10 +141,18 @@ module.exports = {
       const ratingsByName = new Map();
       const memberByNameCandidate = new Map();
 
+      let meaningfulTraineeRowsChecked = 0;
+
       for (let i = 1; i < traineeRows.length; i++) {
         const row = traineeRows[i] || [];
         const rowNumber = i + 1;
         const rowName = row[0] || '';
+
+        if (!isMeaningfulTraineeRow(row)) {
+          continue;
+        }
+
+        meaningfulTraineeRowsChecked++;
 
         for (const candidate of buildNameCandidatesFromRaw(rowName)) {
           if (!candidate) continue;
@@ -174,9 +217,9 @@ module.exports = {
           }
         }
 
-        let reason = 'No match in cached Discord members';
         const matches = [...matchedMembers.values()];
 
+        let reason = 'No match in cached Discord members';
         if (matches.length === 1) {
           const member = matches[0];
           reason = `Safe match available: ${member.user.tag} (${member.id})`;
@@ -192,6 +235,10 @@ module.exports = {
         const rowNumber = i + 1;
         const rowName = row[0] || '';
         const rowDiscordId = (row[8] || '').toString().trim();
+
+        if (!isMeaningfulTraineeRow(row)) {
+          continue;
+        }
 
         if (rowDiscordId) continue;
 
@@ -277,6 +324,7 @@ module.exports = {
 
       const summary = [
         `Ratings rows missing Discord ID: ${ratingsMissingId.length}`,
+        `Meaningful trainee rows checked: ${meaningfulTraineeRowsChecked}`,
         `Trainee rows still unmatched/missing ID: ${traineeUnmatched.length}`,
         `Ranked Discord members missing direct Ratings link: ${rankedMembersMissingRatings.length}`,
         `Cached Discord members checked: ${allMembers.size}`,
