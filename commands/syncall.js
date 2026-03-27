@@ -124,10 +124,23 @@ function buildNameCandidatesFromRaw(raw) {
   return [...candidates];
 }
 
+function getUniqueMatchesByCandidates(candidateMap, candidates, extraFilter = null) {
+  const matches = new Map();
+
+  for (const candidate of candidates) {
+    for (const match of candidateMap.get(candidate) || []) {
+      if (extraFilter && !extraFilter(match)) continue;
+      matches.set(match.rowNumber, match);
+    }
+  }
+
+  return [...matches.values()];
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('syncall')
-    .setDescription('Safely sync member identity and MOS data into the Ratings sheet.'),
+    .setDescription('Safely sync ranked Discord members into the Ratings sheet and remove promoted trainee rows.'),
 
   async execute(interaction) {
     await interaction.deferReply({
@@ -207,7 +220,8 @@ module.exports = {
       let skippedExSkira = 0;
       let skippedNoAllowedRank = 0;
       let skippedNoSafeMatch = 0;
-      let skippedAmbiguous = 0;
+      let skippedAmbiguousRatings = 0;
+      let skippedAmbiguousTrainees = 0;
 
       for (const member of allMembers.values()) {
         if (TRAINEE_ROLE_ID && member.roles.cache.has(TRAINEE_ROLE_ID)) {
@@ -232,22 +246,19 @@ module.exports = {
         let ratingsRow = ratingsByDiscordId.get(member.id) || null;
 
         if (!ratingsRow) {
-          const ratingMatches = new Map();
-
-          for (const candidate of memberCandidates) {
-            for (const match of ratingsByCandidate.get(candidate) || []) {
+          const ratingMatches = getUniqueMatchesByCandidates(
+            ratingsByCandidate,
+            memberCandidates,
+            match => {
               const existingDiscordId = (match.rowValues[18] || '').toString().trim();
-              if (!existingDiscordId || existingDiscordId === member.id) {
-                ratingMatches.set(match.rowNumber, match);
-              }
+              return !existingDiscordId || existingDiscordId === member.id;
             }
-          }
+          );
 
-          const ratingMatchesArr = [...ratingMatches.values()];
-          if (ratingMatchesArr.length === 1) {
-            ratingsRow = ratingMatchesArr[0];
-          } else if (ratingMatchesArr.length > 1) {
-            skippedAmbiguous++;
+          if (ratingMatches.length === 1) {
+            ratingsRow = ratingMatches[0];
+          } else if (ratingMatches.length > 1) {
+            skippedAmbiguousRatings++;
             continue;
           }
         }
@@ -255,21 +266,23 @@ module.exports = {
         let traineeRow = traineeByDiscordId.get(member.id) || null;
 
         if (!traineeRow) {
-          const traineeMatches = new Map();
+          const traineeMatches = getUniqueMatchesByCandidates(
+            traineeByCandidate,
+            memberCandidates
+          );
 
-          for (const candidate of memberCandidates) {
-            for (const match of traineeByCandidate.get(candidate) || []) {
-              traineeMatches.set(match.rowNumber, match);
-            }
-          }
-
-          const traineeMatchesArr = [...traineeMatches.values()];
-          if (traineeMatchesArr.length === 1) {
-            traineeRow = traineeMatchesArr[0];
-          } else if (traineeMatchesArr.length > 1) {
-            skippedAmbiguous++;
+          if (traineeMatches.length === 1) {
+            traineeRow = traineeMatches[0];
+          } else if (traineeMatches.length > 1) {
+            skippedAmbiguousTrainees++;
             continue;
           }
+        }
+
+        // Do not create brand new Ratings rows unless there is a safe trainee row.
+        if (!ratingsRow && !traineeRow) {
+          skippedNoSafeMatch++;
+          continue;
         }
 
         const finalName =
@@ -277,17 +290,12 @@ module.exports = {
           ratingsRow?.rowValues?.[2] ||
           getDisplayNameWithoutRank(member);
 
-        if (!ratingsRow && !traineeRow) {
-          skippedNoSafeMatch++;
-          continue;
-        }
-
         const targetRowNumber = ratingsRow ? ratingsRow.rowNumber : nextNewRatingsRow++;
 
-        if (!ratingsRow) {
-          createdRows++;
-        } else {
+        if (ratingsRow) {
           updatedRows++;
+        } else {
+          createdRows++;
         }
 
         const rowUpdate = new Array(19).fill('');
@@ -338,7 +346,8 @@ module.exports = {
           `**Skipped Ex Skira:** ${skippedExSkira}`,
           `**Skipped No Allowed Rank:** ${skippedNoAllowedRank}`,
           `**Skipped No Safe Match:** ${skippedNoSafeMatch}`,
-          `**Skipped Ambiguous:** ${skippedAmbiguous}`,
+          `**Skipped Ambiguous Ratings:** ${skippedAmbiguousRatings}`,
+          `**Skipped Ambiguous Trainees:** ${skippedAmbiguousTrainees}`,
           `**Done By:** ${interaction.user.tag}`,
           `**Channel:** <#${interaction.channelId}>`,
         ].join('\n')
@@ -354,7 +363,8 @@ module.exports = {
           `Skipped Ex Skira: **${skippedExSkira}**\n` +
           `Skipped no allowed rank: **${skippedNoAllowedRank}**\n` +
           `Skipped no safe match: **${skippedNoSafeMatch}**\n` +
-          `Skipped ambiguous: **${skippedAmbiguous}**`,
+          `Skipped ambiguous Ratings: **${skippedAmbiguousRatings}**\n` +
+          `Skipped ambiguous Trainees: **${skippedAmbiguousTrainees}**`,
         allowedMentions: { users: [] },
       });
     } catch (error) {
