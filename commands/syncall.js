@@ -9,10 +9,18 @@ const {
 } = require('../sheets');
 const { mosConfig } = require('../mosConfig');
 
-const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID;
+const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
+const HQ_ROLE_ID = process.env.HQ_ROLE_ID;
 const RATINGS_SHEET_NAME = process.env.RATINGS_SHEET_NAME || 'Ratings';
 const TRAINEE_ROLE_ID = process.env.TRAINEE_ROLE_ID;
 const EX_SKIRA_ROLE_ID = process.env.EX_SKIRA_ROLE_ID;
+
+function canUseHqCommand(interaction) {
+  return (
+    interaction.channelId === HQ_CHANNEL_ID &&
+    interaction.member?.roles?.cache?.has(HQ_ROLE_ID)
+  );
+}
 
 function getDisplayNameWithoutRank(member) {
   const displayName = member.nickname || member.user.username;
@@ -149,9 +157,9 @@ module.exports = {
     });
 
     try {
-      if (ALLOWED_CHANNEL_ID && interaction.channelId !== ALLOWED_CHANNEL_ID) {
+      if (!canUseHqCommand(interaction)) {
         return interaction.editReply({
-          content: 'This command can only be used in the allowed channel.',
+          content: '❌ This command can only be used by the Headquarters role in the HQ channel.',
           allowedMentions: { users: [] },
         });
       }
@@ -279,7 +287,6 @@ module.exports = {
           }
         }
 
-        // Do not create brand new Ratings rows unless there is a safe trainee row.
         if (!ratingsRow && !traineeRow) {
           skippedNoSafeMatch++;
           continue;

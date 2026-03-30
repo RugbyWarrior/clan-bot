@@ -6,9 +6,17 @@ const {
 } = require('../sheets');
 
 const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
+const HQ_ROLE_ID = process.env.HQ_ROLE_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const TRAINEE_ROLE_ID = process.env.TRAINEE_ROLE_ID;
 const EX_SKIRA_ROLE_ID = process.env.EX_SKIRA_ROLE_ID;
+
+function canUseHqCommand(interaction) {
+  return (
+    interaction.channelId === HQ_CHANNEL_ID &&
+    interaction.member?.roles?.cache?.has(HQ_ROLE_ID)
+  );
+}
 
 function buildNameCandidatesFromRaw(raw) {
   const cleaned = normalizeName(raw);
@@ -58,9 +66,9 @@ module.exports = {
     });
 
     try {
-      if (interaction.channelId !== HQ_CHANNEL_ID) {
+      if (!canUseHqCommand(interaction)) {
         return interaction.editReply({
-          content: '❌ This command can only be used in the HQ channel.',
+          content: '❌ This command can only be used by the Headquarters role in the HQ channel.',
           allowedMentions: { users: [] },
         });
       }
