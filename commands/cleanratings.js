@@ -5,7 +5,7 @@ const {
   getRatingsRows,
 } = require('../sheets');
 
-const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID;
+const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const EX_SKIRA_ROLE_ID = process.env.EX_SKIRA_ROLE_ID;
 const TRAINEE_ROLE_ID = process.env.TRAINEE_ROLE_ID;
@@ -103,9 +103,9 @@ module.exports = {
     });
 
     try {
-      if (ALLOWED_CHANNEL_ID && interaction.channelId !== ALLOWED_CHANNEL_ID) {
+      if (interaction.channelId !== HQ_CHANNEL_ID) {
         return interaction.editReply({
-          content: 'This command can only be used in the allowed channel.',
+          content: '❌ This command can only be used in the HQ channel.',
           allowedMentions: { users: [] },
         });
       }
