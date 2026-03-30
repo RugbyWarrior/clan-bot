@@ -2,6 +2,13 @@ require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const { printStartupValidationReport } = require('./utils/startupValidation');
+
+const startupCheck = printStartupValidationReport();
+
+if (startupCheck.status !== 'valid') {
+  process.exit(1);
+}
 
 const client = new Client({
   intents: [
@@ -17,10 +24,19 @@ const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('
 
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
-  const command = require(filePath);
 
-  if ('data' in command && 'execute' in command) {
-    client.commands.set(command.data.name, command);
+  try {
+    const command = require(filePath);
+
+    if ('data' in command && 'execute' in command) {
+      client.commands.set(command.data.name, command);
+      console.log(`Loaded command: ${command.data.name} (${file})`);
+    } else {
+      console.warn(`Skipped invalid command file: ${file}`);
+    }
+  } catch (error) {
+    console.error(`Failed to load command file: ${file}`);
+    console.error(error);
   }
 }
 
