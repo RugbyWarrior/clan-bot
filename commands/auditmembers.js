@@ -7,14 +7,21 @@ const {
 } = require('../sheets');
 
 const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
+const HQ_ROLE_ID = process.env.HQ_ROLE_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const TRAINEE_ROLE_ID = process.env.TRAINEE_ROLE_ID;
 const EX_SKIRA_ROLE_ID = process.env.EX_SKIRA_ROLE_ID;
 
-function getDisplayNameWithoutRank(member) {
-  const displayName = member.nickname || member.user.username;
-  if (!displayName.includes(' ')) return displayName;
-  return displayName.replace(/^\S+\s+/, '').trim();
+function canUseHqCommand(interaction) {
+  if (!HQ_CHANNEL_ID || !HQ_ROLE_ID) return false;
+
+  return (
+    interaction.channelId === HQ_CHANNEL_ID &&
+    interaction.member &&
+    interaction.member.roles &&
+    interaction.member.roles.cache &&
+    interaction.member.roles.cache.has(HQ_ROLE_ID)
+  );
 }
 
 function getAllowedRankRole(member, guild) {
@@ -105,7 +112,6 @@ function isMeaningfulTraineeRow(row) {
     normalizedNotes === 'notes';
 
   if (looksLikeTemplate) return false;
-
   if (!name && !steamId64 && !discordId) return false;
 
   return true;
@@ -124,9 +130,9 @@ module.exports = {
         allowedMentions: { users: [] },
       });
 
-      if (interaction.channelId !== HQ_CHANNEL_ID) {
+      if (!canUseHqCommand(interaction)) {
         return interaction.editReply({
-          content: '❌ This command can only be used in the HQ channel.',
+          content: '❌ This command can only be used by the Headquarters role in the HQ channel.',
           allowedMentions: { users: [] },
         });
       }
@@ -147,9 +153,7 @@ module.exports = {
         const row = traineeRows[i] || [];
         const rowName = row[0] || '';
 
-        if (!isMeaningfulTraineeRow(row)) {
-          continue;
-        }
+        if (!isMeaningfulTraineeRow(row)) continue;
 
         meaningfulTraineeRowsChecked++;
 
@@ -234,10 +238,7 @@ module.exports = {
         const rowName = row[0] || '';
         const rowDiscordId = (row[8] || '').toString().trim();
 
-        if (!isMeaningfulTraineeRow(row)) {
-          continue;
-        }
-
+        if (!isMeaningfulTraineeRow(row)) continue;
         if (rowDiscordId) continue;
 
         const candidates = buildNameCandidatesFromRaw(rowName);

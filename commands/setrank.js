@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { google } = require('googleapis');
 const { sendLog } = require('../logger');
 const { updateNickname } = require('../utils/updateNickname');
 const {
@@ -10,7 +11,197 @@ const {
   deleteTraineeRow,
 } = require('../sheets');
 
-const RATINGS_SHEET_NAME = process.env.RATINGS_SHEET_NAME || 'Ratings';
+const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
+const HQ_ROLE_ID = process.env.HQ_ROLE_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+
+const RATINGS_SHEET_NAME = (process.env.RATINGS_SHEET_NAME || 'Ratings').trim();
+const TRAINEE_SHEET_NAME = (process.env.TRAINEE_SHEET_NAME || 'Trainees').trim();
+
+const TRAINEE_SPREADSHEET_ID = (process.env.TRAINEE_SPREADSHEET_ID || '').trim();
+const RATINGS_SPREADSHEET_ID = (
+  process.env.RATINGS_SPREADSHEET_ID ||
+  process.env.MOS_SPREADSHEET_ID ||
+  process.env.TRAINEE_SPREADSHEET_ID ||
+  ''
+).trim();
+
+function canUseHqCommand(interaction) {
+  if (!HQ_CHANNEL_ID || !HQ_ROLE_ID) return false;
+
+  return (
+    interaction.channelId === HQ_CHANNEL_ID &&
+    interaction.member &&
+    interaction.member.roles &&
+    interaction.member.roles.cache &&
+    interaction.member.roles.cache.has(HQ_ROLE_ID)
+  );
+}
+
+function getDisplayNameWithoutRank(member) {
+  const displayName = member.nickname || member.user.username;
+  if (!displayName.includes(' ')) return displayName;
+  return displayName.replace(/^\S+\s+/, '').trim();
+}
+
+function getSheetSquadronName(member) {
+  if (member.roles.cache.has(process.env.INFANTRY_ROLE_ID)) return '3rd Rifles';
+  if (member.roles.cache.has(process.env.ARMOUR_ROLE_ID)) return '20th Hussars';
+  if (member.roles.cache.has(process.env.AVIATION_ROLE_ID)) return '230th Aviation';
+  return '';
+}
+
+function formatUkDate(date = new Date()) {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear());
+  return `${day}/${month}/${year}`;
+}
+
+async function getSheetsClient() {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+
+  const authClient = await auth.getClient();
+
+  return google.sheets({
+    version: 'v4',
+    auth: authClient,
+  });
+}
+
+async function getSheetId(spreadsheetId, sheetName) {
+  const sheets = await getSheetsClient();
+
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId,
+  });
+
+  const targetSheet = response.data.sheets.find(
+    s => s.properties.title === sheetName
+  );
+
+  if (!targetSheet) {
+    throw new Error(`Could not find sheet tab named "${sheetName}".`);
+  }
+
+  return targetSheet.properties.sheetId;
+}
+
+async function deleteSheetRow(spreadsheetId, sheetName, rowNumber) {
+  const sheets = await getSheetsClient();
+  const sheetId = await getSheetId(spreadsheetId, sheetName);
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: 'ROWS',
+              startIndex: rowNumber - 1,
+              endIndex: rowNumber,
+            },
+          },
+        },
+      ],
+    },
+  });
+}
+
+async function getSheetValues(spreadsheetId, range) {
+  const sheets = await getSheetsClient();
+
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  });
+
+  return response.data.values || [];
+}
+
+async function updateSheetRange(spreadsheetId, range, values) {
+  const sheets = await getSheetsClient();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: {
+      values,
+    },
+  });
+}
+
+async function deleteRatingsRowByDiscordId(discordId) {
+  if (!discordId) return false;
+
+  const ratingsRow = await findRatingsRowByDiscordId(discordId);
+  if (!ratingsRow) return false;
+
+  await deleteSheetRow(RATINGS_SPREADSHEET_ID, RATINGS_SHEET_NAME, ratingsRow.rowNumber);
+  return ratingsRow.rowNumber;
+}
+
+async function upsertTraineeRow({ name, steamId64, discordId }) {
+  const rows = await getSheetValues(
+    TRAINEE_SPREADSHEET_ID,
+    `${TRAINEE_SHEET_NAME}!A:I`
+  );
+
+  let targetRowNumber = null;
+  let existingRow = null;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const rowDiscordId = (row[8] || '').toString().trim();
+
+    if (rowDiscordId && rowDiscordId === String(discordId).trim()) {
+      targetRowNumber = i + 1;
+      existingRow = row;
+      break;
+    }
+  }
+
+  if (!targetRowNumber) {
+    const firstEmpty = rows.findIndex((row, index) => {
+      if (index === 0) return false;
+      const safeRow = row || [];
+      return safeRow.every(cell => !String(cell || '').trim());
+    });
+
+    if (firstEmpty !== -1) {
+      targetRowNumber = firstEmpty + 1;
+    } else {
+      targetRowNumber = rows.length + 1;
+    }
+  }
+
+  const rowValues = new Array(9).fill('');
+
+  if (existingRow) {
+    for (let i = 0; i < Math.min(existingRow.length, 9); i++) {
+      rowValues[i] = existingRow[i] || '';
+    }
+  }
+
+  rowValues[0] = name || rowValues[0] || '';
+  rowValues[1] = rowValues[1] || formatUkDate();
+  rowValues[3] = steamId64 || rowValues[3] || '';
+  rowValues[8] = discordId || rowValues[8] || '';
+
+  await updateSheetRange(
+    TRAINEE_SPREADSHEET_ID,
+    `${TRAINEE_SHEET_NAME}!A${targetRowNumber}:I${targetRowNumber}`,
+    [rowValues]
+  );
+
+  return targetRowNumber;
+}
 
 const rankConfig = {
   EX_SKIRA: {
@@ -138,19 +329,6 @@ const rankConfig = {
   },
 };
 
-function getDisplayNameWithoutRank(member) {
-  const displayName = member.nickname || member.user.username;
-  if (!displayName.includes(' ')) return displayName;
-  return displayName.replace(/^\S+\s+/, '').trim();
-}
-
-function getSheetSquadronName(member) {
-  if (member.roles.cache.has(process.env.INFANTRY_ROLE_ID)) return '3rd Rifles';
-  if (member.roles.cache.has(process.env.ARMOUR_ROLE_ID)) return '20th Hussars';
-  if (member.roles.cache.has(process.env.AVIATION_ROLE_ID)) return '230th Aviation';
-  return '';
-}
-
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setrank')
@@ -178,6 +356,12 @@ module.exports = {
           { name: 'Sergeant', value: 'SERGEANT' },
           { name: 'Staff Sergeant', value: 'STAFF_SERGEANT' }
         )
+    )
+    .addStringOption(option =>
+      option
+        .setName('steamid64')
+        .setDescription('Optional SteamID64 (used when setting someone to Trainee)')
+        .setRequired(false)
     ),
 
   async execute(interaction) {
@@ -187,9 +371,9 @@ module.exports = {
     });
 
     try {
-      if (interaction.channelId !== process.env.HQ_CHANNEL_ID) {
+      if (!canUseHqCommand(interaction)) {
         await interaction.editReply({
-          content: '❌ You can only use this command in Headquarters.',
+          content: '❌ This command can only be used by the Headquarters role in the HQ channel.',
           allowedMentions: { users: [] },
         });
         return;
@@ -197,6 +381,8 @@ module.exports = {
 
       const user = interaction.options.getUser('user');
       const rankKey = interaction.options.getString('rank');
+      const steamId64 = (interaction.options.getString('steamid64') || '').trim();
+
       let member = await interaction.guild.members.fetch(user.id);
 
       const selectedRank = rankConfig[rankKey];
@@ -216,14 +402,6 @@ module.exports = {
       if (!targetRankRoleId) {
         await interaction.editReply({
           content: `❌ Missing ${selectedRank.roleEnv} in .env`,
-          allowedMentions: { users: [] },
-        });
-        return;
-      }
-
-      if (member.roles.cache.has(targetRankRoleId)) {
-        await interaction.editReply({
-          content: `<@${user.id}> already has rank **${selectedRank.label}**.`,
           allowedMentions: { users: [] },
         });
         return;
@@ -270,6 +448,7 @@ module.exports = {
         }
       }
 
+      // ---- TRAINEE BRANCH ----
       if (selectedRank.traineeState) {
         const rolesToRemove = [];
 
@@ -316,23 +495,34 @@ module.exports = {
           exSkira: selectedRank.exSkiraSuffix,
         });
 
+        const ratingsRowDeleted = await deleteRatingsRowByDiscordId(user.id);
+
+        const traineeRowNumber = await upsertTraineeRow({
+          name: getDisplayNameWithoutRank(member),
+          steamId64,
+          discordId: user.id,
+        });
+
         await interaction.editReply({
-          content: `✅ Set <@${user.id}> to **${selectedRank.label}** and added **Training Company**.`,
+          content:
+            `✅ Set <@${user.id}> to **${selectedRank.label}** and added **Training Company**.\n` +
+            `Trainee row updated: **${traineeRowNumber}**\n` +
+            `Ratings row removed: **${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No existing row found'}**`,
           allowedMentions: { users: [] },
         });
 
         await sendLog(
           interaction.guild,
-          process.env.LOG_CHANNEL_ID,
+          LOG_CHANNEL_ID,
           [
             '**[SET RANK]**',
             `**User:** <@${user.id}> (${user.id})`,
             `**New Rank:** ${selectedRank.label}`,
             `**Breaker Added:** None`,
             `**Squadron Added:** None`,
-            `**Ratings Sheet Updated:** No`,
-            `**Trainee Row Found:** ${traineeRow ? 'Yes' : 'No'}`,
-            `**Trainee Row Removed:** No`,
+            `**Ratings Row Removed:** ${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No'}`,
+            `**Trainee Row Upserted:** ${traineeRowNumber}`,
+            `**SteamID64 Used:** ${steamId64 || 'Blank'}`,
             `**Done By:** ${interaction.user.tag}`,
             `**Channel:** <#${interaction.channelId}>`,
           ].join('\n')
@@ -443,7 +633,7 @@ module.exports = {
       }
 
       if (autoAssignedInfantry) {
-        replyMessage += ' Infantry was auto-assigned because they were promoted from trainee.';
+        replyMessage += ` Infantry was auto-assigned because they were promoted from trainee.`;
       }
 
       let traineeRowRemoved = false;
@@ -452,6 +642,37 @@ module.exports = {
         traineeRowRemoved = true;
       }
 
+      // ---- EX SKIRA BRANCH: remove Ratings and stop there ----
+      if (rankKey === 'EX_SKIRA') {
+        const ratingsRowDeleted = await deleteRatingsRowByDiscordId(user.id);
+
+        await interaction.editReply({
+          content:
+            replyMessage +
+            ` Ratings row removed: **${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No existing row found'}**.`,
+          allowedMentions: { users: [] },
+        });
+
+        await sendLog(
+          interaction.guild,
+          LOG_CHANNEL_ID,
+          [
+            '**[SET RANK]**',
+            `**User:** <@${user.id}> (${user.id})`,
+            `**New Rank:** ${selectedRank.label}`,
+            `**Breaker Added:** ${breakerName}`,
+            `**Squadron Added:** ${squadronName || 'None'}`,
+            `**Auto Assigned Infantry:** ${autoAssignedInfantry ? 'Yes' : 'No'}`,
+            `**Ratings Row Removed:** ${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No'}`,
+            `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
+            `**Done By:** ${interaction.user.tag}`,
+            `**Channel:** <#${interaction.channelId}>`,
+          ].join('\n')
+        );
+        return;
+      }
+
+      // ---- NORMAL RANKS: keep/update Ratings ----
       let ratingsRow = await findRatingsRowByDiscordId(user.id);
       let createdRatingsRow = false;
 
@@ -500,7 +721,7 @@ module.exports = {
 
       await sendLog(
         interaction.guild,
-        process.env.LOG_CHANNEL_ID,
+        LOG_CHANNEL_ID,
         [
           '**[SET RANK]**',
           `**User:** <@${user.id}> (${user.id})`,
