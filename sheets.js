@@ -35,16 +35,6 @@ async function getSpreadsheetMeta(spreadsheetId = TRAINEE_SPREADSHEET_ID) {
   return response.data;
 }
 
-/**
- * Normalises names for safe matching between Discord and Sheets.
- * Handles:
- * - rank prefixes (full + abbreviated)
- * - [clan tags]
- * - quoted nicknames like "PMC"
- * - (Ex Skira)
- * - punctuation / symbols
- * - spacing / case differences
- */
 function normalizeName(value) {
   return String(value || '')
     .trim()
@@ -77,7 +67,7 @@ async function getRatingsRows() {
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: RATINGS_SPREADSHEET_ID,
-    range: `${RATINGS_SHEET_NAME}!A:T`,
+    range: `${RATINGS_SHEET_NAME}!A:U`,
   });
 
   return response.data.values || [];
@@ -317,8 +307,9 @@ async function writeRatingsRow(values) {
     const nameCell = (row[2] || '').toString().trim();
     const discordIdCell = (row[18] || '').toString().trim();
     const steamId64Cell = (row[19] || '').toString().trim();
+    const rankOrderCell = (row[20] || '').toString().trim();
 
-    if (!nameCell && !discordIdCell && !steamId64Cell) {
+    if (!nameCell && !discordIdCell && !steamId64Cell && !rankOrderCell) {
       targetRowNumber = i + 1;
       break;
     }
@@ -328,11 +319,11 @@ async function writeRatingsRow(values) {
     targetRowNumber = rows.length + 1;
   }
 
-  const paddedValues = padRow(values, 20);
+  const paddedValues = padRow(values, 21);
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: RATINGS_SPREADSHEET_ID,
-    range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:T${targetRowNumber}`,
+    range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:U${targetRowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [paddedValues],
@@ -372,6 +363,47 @@ async function batchUpdateRatingsCells(updates) {
   });
 }
 
+async function sortRatingsSheet() {
+  const sheets = await getSheetsClient();
+  const spreadsheet = await getSpreadsheetMeta(RATINGS_SPREADSHEET_ID);
+
+  const ratingsSheet = spreadsheet.sheets.find(
+    s => s.properties.title === RATINGS_SHEET_NAME
+  );
+
+  if (!ratingsSheet) {
+    throw new Error(`${RATINGS_SHEET_NAME} sheet not found.`);
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: RATINGS_SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          sortRange: {
+            range: {
+              sheetId: ratingsSheet.properties.sheetId,
+              startRowIndex: 1,
+              startColumnIndex: 0,
+              endColumnIndex: 21,
+            },
+            sortSpecs: [
+              {
+                dimensionIndex: 20,
+                sortOrder: 'ASCENDING',
+              },
+              {
+                dimensionIndex: 2,
+                sortOrder: 'ASCENDING',
+              },
+            ],
+          },
+        },
+      ],
+    },
+  });
+}
+
 module.exports = {
   normalizeName,
   getTraineeRows,
@@ -388,4 +420,5 @@ module.exports = {
   batchUpdateTraineeCells,
   batchUpdateRatingsCells,
   deleteTraineeRow,
+  sortRatingsSheet,
 };
