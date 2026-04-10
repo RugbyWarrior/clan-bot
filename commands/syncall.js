@@ -58,7 +58,7 @@ function resolveSheetColumn(columnOrHeader) {
 
   const trimmed = String(columnOrHeader).trim();
 
-  if (/^[A-S]$/i.test(trimmed)) {
+  if (/^[A-T]$/i.test(trimmed)) {
     return trimmed.toUpperCase();
   }
 
@@ -82,6 +82,7 @@ function resolveSheetColumn(columnOrHeader) {
     'Irregular Warfare (R)': 'Q',
     'Knife (R)': 'R',
     'Discord ID': 'S',
+    SteamID64: 'T',
   };
 
   return headerToColumn[trimmed] || null;
@@ -297,6 +298,11 @@ module.exports = {
           ratingsRow?.rowValues?.[2] ||
           getDisplayNameWithoutRank(member);
 
+        const existingSteamId64 =
+          (ratingsRow?.rowValues?.[19] || '').toString().trim() ||
+          (traineeRow?.rowValues?.[3] || '').toString().trim() ||
+          '';
+
         const targetRowNumber = ratingsRow ? ratingsRow.rowNumber : nextNewRatingsRow++;
 
         if (ratingsRow) {
@@ -305,7 +311,7 @@ module.exports = {
           createdRows++;
         }
 
-        const rowUpdate = new Array(19).fill('');
+        const rowUpdate = new Array(20).fill('');
         rowUpdate[0] = rankRole.name;
         rowUpdate[1] = squadronName;
         rowUpdate[2] = finalName;
@@ -318,10 +324,11 @@ module.exports = {
           rowUpdate[index] = getMosSheetValue(member, interaction.guild, config);
         }
 
-        rowUpdate[18] = member.id;
+        rowUpdate[18] = member.id;          // S = Discord ID
+        rowUpdate[19] = existingSteamId64;  // T = SteamID64
 
         ratingsUpdates.push({
-          range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:S${targetRowNumber}`,
+          range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:T${targetRowNumber}`,
           values: [rowUpdate],
         });
 
