@@ -77,7 +77,7 @@ async function getRatingsRows() {
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: RATINGS_SPREADSHEET_ID,
-    range: `${RATINGS_SHEET_NAME}!A:S`,
+    range: `${RATINGS_SHEET_NAME}!A:T`,
   });
 
   return response.data.values || [];
@@ -95,6 +95,14 @@ function isPlaceholderOrEmpty(value) {
     cleaned === 'steamid64' ||
     cleaned === 'notes'
   );
+}
+
+function padRow(values, length) {
+  const padded = Array.isArray(values) ? [...values] : [];
+  while (padded.length < length) {
+    padded.push('');
+  }
+  return padded.slice(0, length);
 }
 
 /* ---------------- TRAINEE ---------------- */
@@ -183,12 +191,14 @@ async function writeTraineeRow(values) {
     targetRowNumber = rows.length + 1;
   }
 
+  const paddedValues = padRow(values, 9);
+
   await sheets.spreadsheets.values.update({
     spreadsheetId: TRAINEE_SPREADSHEET_ID,
     range: `${TRAINEE_SHEET_NAME}!A${targetRowNumber}:I${targetRowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
-      values: [values],
+      values: [paddedValues],
     },
   });
 
@@ -306,8 +316,9 @@ async function writeRatingsRow(values) {
     const row = rows[i] || [];
     const nameCell = (row[2] || '').toString().trim();
     const discordIdCell = (row[18] || '').toString().trim();
+    const steamId64Cell = (row[19] || '').toString().trim();
 
-    if (!nameCell && !discordIdCell) {
+    if (!nameCell && !discordIdCell && !steamId64Cell) {
       targetRowNumber = i + 1;
       break;
     }
@@ -317,12 +328,14 @@ async function writeRatingsRow(values) {
     targetRowNumber = rows.length + 1;
   }
 
+  const paddedValues = padRow(values, 20);
+
   await sheets.spreadsheets.values.update({
     spreadsheetId: RATINGS_SPREADSHEET_ID,
-    range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:S${targetRowNumber}`,
+    range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:T${targetRowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
-      values: [values],
+      values: [paddedValues],
     },
   });
 
