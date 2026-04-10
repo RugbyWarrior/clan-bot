@@ -6,6 +6,7 @@ const {
   batchUpdateRatingsCells,
   normalizeName,
   deleteTraineeRow,
+  sortRatingsSheet,
 } = require('../sheets');
 const { mosConfig } = require('../mosConfig');
 
@@ -20,6 +21,41 @@ function canUseHqCommand(interaction) {
     interaction.channelId === HQ_CHANNEL_ID &&
     interaction.member?.roles?.cache?.has(HQ_ROLE_ID)
   );
+}
+
+function getRankOrder(rankLabel) {
+  const order = {
+    'Brigadier': 1,
+    'Colonel': 2,
+    'Major': 3,
+    'Captain': 4,
+    'Lieutenant': 5,
+    'Squadron Leader': 6,
+    'S/L': 6,
+    'Second Lieutenant': 7,
+    '2LT': 7,
+    'Flight Lieutenant': 8,
+    'Warrant Officer 1': 9,
+    'WO1': 9,
+    'Warrant Officer 2': 10,
+    'WO2': 10,
+    'Staff Sergeant': 11,
+    'Sergeant': 12,
+    'Corporal': 13,
+    'Flying Officer': 14,
+    'Flight Officer': 14,
+    'F/O': 14,
+    'Lance Corporal': 15,
+    'Pilot Officer': 16,
+    'Armour Trooper': 17,
+    'Officer Cadet': 18,
+    'Armour Cadet': 19,
+    'Private': 20,
+    'Trainee': 99,
+    'Ex Skira': 999,
+  };
+
+  return order[rankLabel] ?? 999;
 }
 
 function getDisplayNameWithoutRank(member) {
@@ -58,7 +94,7 @@ function resolveSheetColumn(columnOrHeader) {
 
   const trimmed = String(columnOrHeader).trim();
 
-  if (/^[A-T]$/i.test(trimmed)) {
+  if (/^[A-U]$/i.test(trimmed)) {
     return trimmed.toUpperCase();
   }
 
@@ -83,6 +119,7 @@ function resolveSheetColumn(columnOrHeader) {
     'Knife (R)': 'R',
     'Discord ID': 'S',
     SteamID64: 'T',
+    RankOrder: 'U',
   };
 
   return headerToColumn[trimmed] || null;
@@ -311,7 +348,7 @@ module.exports = {
           createdRows++;
         }
 
-        const rowUpdate = new Array(20).fill('');
+        const rowUpdate = new Array(21).fill('');
         rowUpdate[0] = rankRole.name;
         rowUpdate[1] = squadronName;
         rowUpdate[2] = finalName;
@@ -324,11 +361,12 @@ module.exports = {
           rowUpdate[index] = getMosSheetValue(member, interaction.guild, config);
         }
 
-        rowUpdate[18] = member.id;          // S = Discord ID
-        rowUpdate[19] = existingSteamId64;  // T = SteamID64
+        rowUpdate[18] = member.id;
+        rowUpdate[19] = existingSteamId64;
+        rowUpdate[20] = getRankOrder(rankRole.name);
 
         ratingsUpdates.push({
-          range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:T${targetRowNumber}`,
+          range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:U${targetRowNumber}`,
           values: [rowUpdate],
         });
 
@@ -339,6 +377,7 @@ module.exports = {
 
       if (ratingsUpdates.length > 0) {
         await batchUpdateRatingsCells(ratingsUpdates);
+        await sortRatingsSheet();
       }
 
       const uniqueRowsToDelete = [...new Set(traineeRowsToDelete)].sort((a, b) => b - a);
@@ -362,6 +401,7 @@ module.exports = {
           `**Skipped No Safe Match:** ${skippedNoSafeMatch}`,
           `**Skipped Ambiguous Ratings:** ${skippedAmbiguousRatings}`,
           `**Skipped Ambiguous Trainees:** ${skippedAmbiguousTrainees}`,
+          `**Sorted Ratings Sheet:** Yes`,
           `**Done By:** ${interaction.user.tag}`,
           `**Channel:** <#${interaction.channelId}>`,
         ].join('\n')
@@ -378,7 +418,8 @@ module.exports = {
           `Skipped no allowed rank: **${skippedNoAllowedRank}**\n` +
           `Skipped no safe match: **${skippedNoSafeMatch}**\n` +
           `Skipped ambiguous Ratings: **${skippedAmbiguousRatings}**\n` +
-          `Skipped ambiguous Trainees: **${skippedAmbiguousTrainees}**`,
+          `Skipped ambiguous Trainees: **${skippedAmbiguousTrainees}**\n` +
+          `Sorted Ratings sheet: **Yes**`,
         allowedMentions: { users: [] },
       });
     } catch (error) {

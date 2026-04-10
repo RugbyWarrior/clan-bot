@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { sendLog } = require('../logger');
 const { updateNickname } = require('../utils/updateNickname');
+const { sortRatingsSheet } = require('../sheets');
 const {
   findRatingsRowByDiscordId,
   writeRatingsRow,
@@ -36,6 +37,41 @@ function canUseHqCommand(interaction) {
     interaction.member.roles.cache &&
     interaction.member.roles.cache.has(HQ_ROLE_ID)
   );
+}
+
+function getRankOrder(rankLabel) {
+  const order = {
+    'Brigadier': 1,
+    'Colonel': 2,
+    'Major': 3,
+    'Captain': 4,
+    'Lieutenant': 5,
+    'Squadron Leader': 6,
+    'S/L': 6,
+    'Second Lieutenant': 7,
+    '2LT': 7,
+    'Flight Lieutenant': 8,
+    'Warrant Officer 1': 9,
+    'WO1': 9,
+    'Warrant Officer 2': 10,
+    'WO2': 10,
+    'Staff Sergeant': 11,
+    'Sergeant': 12,
+    'Corporal': 13,
+    'Flying Officer': 14,
+    'Flight Officer': 14,
+    'F/O': 14,
+    'Lance Corporal': 15,
+    'Pilot Officer': 16,
+    'Armour Trooper': 17,
+    'Officer Cadet': 18,
+    'Armour Cadet': 19,
+    'Private': 20,
+    'Trainee': 99,
+    'Ex Skira': 999,
+  };
+
+  return order[rankLabel] ?? 999;
 }
 
 function getDisplayNameWithoutRank(member) {
@@ -732,13 +768,16 @@ module.exports = {
         ratingsSteamId64 ||
         '';
 
+      const rankOrderForRatings = getRankOrder(selectedRank.label);
+
       if (!ratingsRow) {
-        const newRow = new Array(20).fill('');
+        const newRow = new Array(21).fill('');
         newRow[0] = selectedRank.label;
         newRow[1] = squadronName;
         newRow[2] = finalSheetName;
         newRow[18] = user.id;
         newRow[19] = steamId64ForRatings;
+        newRow[20] = rankOrderForRatings;
 
         const rowNumber = await writeRatingsRow(newRow);
 
@@ -771,7 +810,13 @@ module.exports = {
           range: `${RATINGS_SHEET_NAME}!T${ratingsRow.rowNumber}`,
           values: [[steamId64ForRatings]],
         },
+        {
+          range: `${RATINGS_SHEET_NAME}!U${ratingsRow.rowNumber}`,
+          values: [[rankOrderForRatings]],
+        },
       ]);
+
+      await sortRatingsSheet();
 
       await interaction.editReply({
         content:
@@ -795,6 +840,8 @@ module.exports = {
           `**Ratings Row:** ${ratingsRow.rowNumber}`,
           `**Ratings Row Created:** ${createdRatingsRow ? 'Yes' : 'No'}`,
           `**SteamID64 Written To Ratings:** ${steamId64ForRatings || 'Blank'}`,
+          `**Rank Order Written:** ${rankOrderForRatings}`,
+          `**Ratings Sheet Sorted:** Yes`,
           `**Trainee Row Found:** ${traineeRow ? 'Yes' : 'No'}`,
           `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
           `**Done By:** ${interaction.user.tag}`,
