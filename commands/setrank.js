@@ -138,10 +138,10 @@ async function updateSheetRange(spreadsheetId, range, values) {
 }
 
 async function deleteRatingsRowByDiscordId(discordId) {
-  if (!discordId) return false;
+  if (!discordId) return null;
 
   const ratingsRow = await findRatingsRowByDiscordId(discordId);
-  if (!ratingsRow) return false;
+  if (!ratingsRow) return null;
 
   await deleteSheetRow(RATINGS_SPREADSHEET_ID, RATINGS_SHEET_NAME, ratingsRow.rowNumber);
   return ratingsRow.rowNumber;
@@ -381,7 +381,7 @@ module.exports = {
 
       const user = interaction.options.getUser('user');
       const rankKey = interaction.options.getString('rank');
-      const steamId64 = (interaction.options.getString('steamid64') || '').trim();
+      const providedSteamId64 = (interaction.options.getString('steamid64') || '').trim();
 
       let member = await interaction.guild.members.fetch(user.id);
 
@@ -407,6 +407,14 @@ module.exports = {
         return;
       }
 
+      if (member.roles.cache.has(targetRankRoleId)) {
+        await interaction.editReply({
+          content: `<@${user.id}> already has rank **${selectedRank.label}**.`,
+          allowedMentions: { users: [] },
+        });
+        return;
+      }
+
       const rankRoleIds = (process.env.RANK_ROLE_IDS || '')
         .split(',')
         .map(id => id.trim())
@@ -425,6 +433,7 @@ module.exports = {
       const traineeRoleId = process.env.TRAINEE_ROLE_ID;
       const trainingCompanyRoleId = process.env.TRAINING_COMPANY_ROLE_ID;
       const infantryRoleId = process.env.INFANTRY_ROLE_ID;
+      const skiraMemberRoleId = process.env.SKIRA_MEMBER_ROLE_ID;
 
       const wasCurrentlyTrainee = traineeRoleId
         ? member.roles.cache.has(traineeRoleId)
@@ -432,6 +441,7 @@ module.exports = {
 
       let traineeRow = null;
       let traineeSheetName = null;
+      let traineeSteamId64 = '';
 
       if (wasCurrentlyTrainee) {
         traineeRow = await findTraineeRowByDiscordId(user.id);
@@ -445,10 +455,15 @@ module.exports = {
 
         if (traineeRow) {
           traineeSheetName = traineeRow.rowValues[0] || null;
+          traineeSteamId64 = (traineeRow.rowValues[3] || '').toString().trim();
         }
       }
 
-      // ---- TRAINEE BRANCH ----
+      const existingRatingsRow = await findRatingsRowByDiscordId(user.id);
+      const ratingsSteamId64 = existingRatingsRow
+        ? (existingRatingsRow.rowValues?.[19] || '').toString().trim()
+        : '';
+
       if (selectedRank.traineeState) {
         const rolesToRemove = [];
 
@@ -468,6 +483,10 @@ module.exports = {
           if (member.roles.cache.has(squadronRoleId)) {
             rolesToRemove.push(squadronRoleId);
           }
+        }
+
+        if (skiraMemberRoleId && member.roles.cache.has(skiraMemberRoleId)) {
+          rolesToRemove.push(skiraMemberRoleId);
         }
 
         if (rolesToRemove.length > 0) {
@@ -497,9 +516,15 @@ module.exports = {
 
         const ratingsRowDeleted = await deleteRatingsRowByDiscordId(user.id);
 
+        const steamId64ToWrite =
+          providedSteamId64 ||
+          ratingsSteamId64 ||
+          traineeSteamId64 ||
+          '';
+
         const traineeRowNumber = await upsertTraineeRow({
           name: getDisplayNameWithoutRank(member),
-          steamId64,
+          steamId64: steamId64ToWrite,
           discordId: user.id,
         });
 
@@ -507,6 +532,7 @@ module.exports = {
           content:
             `✅ Set <@${user.id}> to **${selectedRank.label}** and added **Training Company**.\n` +
             `Trainee row updated: **${traineeRowNumber}**\n` +
+            `SteamID64 used: **${steamId64ToWrite || 'Blank'}**\n` +
             `Ratings row removed: **${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No existing row found'}**`,
           allowedMentions: { users: [] },
         });
@@ -520,9 +546,10 @@ module.exports = {
             `**New Rank:** ${selectedRank.label}`,
             `**Breaker Added:** None`,
             `**Squadron Added:** None`,
+            `**Skira Member Removed:** ${skiraMemberRoleId ? 'Yes if present' : 'No config'}`,
             `**Ratings Row Removed:** ${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No'}`,
             `**Trainee Row Upserted:** ${traineeRowNumber}`,
-            `**SteamID64 Used:** ${steamId64 || 'Blank'}`,
+            `**SteamID64 Used:** ${steamId64ToWrite || 'Blank'}`,
             `**Done By:** ${interaction.user.tag}`,
             `**Channel:** <#${interaction.channelId}>`,
           ].join('\n')
@@ -537,6 +564,8 @@ module.exports = {
 
       let squadronRoleToAdd = null;
       let autoAssignedInfantry = false;
+      let addedSkiraMember = false;
+      let removedSkiraMember = false;
 
       if (selectedRank.autoInfantryFromTrainee && wasCurrentlyTrainee) {
         if (!infantryRoleId) {
@@ -589,6 +618,11 @@ module.exports = {
         }
       }
 
+      if (rankKey === 'EX_SKIRA' && skiraMemberRoleId && member.roles.cache.has(skiraMemberRoleId)) {
+        rolesToRemove.push(skiraMemberRoleId);
+        removedSkiraMember = true;
+      }
+
       if (rolesToRemove.length > 0) {
         await member.roles.remove(rolesToRemove, 'Cleaning old rank, breaker, trainee, and squadron roles');
       }
@@ -603,6 +637,14 @@ module.exports = {
 
       if (squadronRoleToAdd && !member.roles.cache.has(squadronRoleToAdd)) {
         await member.roles.add(squadronRoleToAdd, 'Auto-assigned Infantry on first promotion from trainee');
+      }
+
+      if (wasCurrentlyTrainee && skiraMemberRoleId && !member.roles.cache.has(skiraMemberRoleId) && rankKey !== 'EX_SKIRA') {
+        await member.roles.add(
+          skiraMemberRoleId,
+          'Skira Member role added on first promotion from trainee'
+        );
+        addedSkiraMember = true;
       }
 
       await updateNickname(member, {
@@ -636,13 +678,20 @@ module.exports = {
         replyMessage += ` Infantry was auto-assigned because they were promoted from trainee.`;
       }
 
+      if (addedSkiraMember) {
+        replyMessage += ` Added **Skira Member** role.`;
+      }
+
+      if (removedSkiraMember) {
+        replyMessage += ` Removed **Skira Member** role.`;
+      }
+
       let traineeRowRemoved = false;
       if (wasCurrentlyTrainee && traineeRow) {
         await deleteTraineeRow(traineeRow.rowNumber);
         traineeRowRemoved = true;
       }
 
-      // ---- EX SKIRA BRANCH: remove Ratings and stop there ----
       if (rankKey === 'EX_SKIRA') {
         const ratingsRowDeleted = await deleteRatingsRowByDiscordId(user.id);
 
@@ -663,6 +712,7 @@ module.exports = {
             `**Breaker Added:** ${breakerName}`,
             `**Squadron Added:** ${squadronName || 'None'}`,
             `**Auto Assigned Infantry:** ${autoAssignedInfantry ? 'Yes' : 'No'}`,
+            `**Skira Member Removed:** ${removedSkiraMember ? 'Yes' : 'No'}`,
             `**Ratings Row Removed:** ${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No'}`,
             `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
             `**Done By:** ${interaction.user.tag}`,
@@ -672,18 +722,23 @@ module.exports = {
         return;
       }
 
-      // ---- NORMAL RANKS: keep/update Ratings ----
-      let ratingsRow = await findRatingsRowByDiscordId(user.id);
+      let ratingsRow = existingRatingsRow;
       let createdRatingsRow = false;
 
       const finalSheetName = traineeSheetName || getDisplayNameWithoutRank(member);
+      const steamId64ForRatings =
+        traineeSteamId64 ||
+        providedSteamId64 ||
+        ratingsSteamId64 ||
+        '';
 
       if (!ratingsRow) {
-        const newRow = new Array(19).fill('');
+        const newRow = new Array(20).fill('');
         newRow[0] = selectedRank.label;
         newRow[1] = squadronName;
         newRow[2] = finalSheetName;
         newRow[18] = user.id;
+        newRow[19] = steamId64ForRatings;
 
         const rowNumber = await writeRatingsRow(newRow);
 
@@ -712,10 +767,16 @@ module.exports = {
           range: `${RATINGS_SHEET_NAME}!S${ratingsRow.rowNumber}`,
           values: [[user.id]],
         },
+        {
+          range: `${RATINGS_SHEET_NAME}!T${ratingsRow.rowNumber}`,
+          values: [[steamId64ForRatings]],
+        },
       ]);
 
       await interaction.editReply({
-        content: replyMessage,
+        content:
+          replyMessage +
+          ` SteamID64 moved to Ratings: **${steamId64ForRatings || 'Blank'}**.`,
         allowedMentions: { users: [] },
       });
 
@@ -729,9 +790,11 @@ module.exports = {
           `**Breaker Added:** ${breakerName}`,
           `**Squadron Added:** ${squadronName || 'None'}`,
           `**Auto Assigned Infantry:** ${autoAssignedInfantry ? 'Yes' : 'No'}`,
+          `**Skira Member Added:** ${addedSkiraMember ? 'Yes' : 'No'}`,
           `**Ratings Sheet Name:** ${RATINGS_SHEET_NAME}`,
           `**Ratings Row:** ${ratingsRow.rowNumber}`,
           `**Ratings Row Created:** ${createdRatingsRow ? 'Yes' : 'No'}`,
+          `**SteamID64 Written To Ratings:** ${steamId64ForRatings || 'Blank'}`,
           `**Trainee Row Found:** ${traineeRow ? 'Yes' : 'No'}`,
           `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
           `**Done By:** ${interaction.user.tag}`,
