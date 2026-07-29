@@ -1,16 +1,24 @@
 {
-  "name": "clan-bot",
-  "version": "1.0.0",
-  "description": "",
+  "name": "orion-discord-bot",
+  "version": "0.1.0",
+  "description": "Orion operations bot for Galactic Sim cadet intake and Google Sheets synchronisation.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "deploy": "node deploy-commands.js"
+    "deploy": "node deploy-commands.js",
+    "check": "node --check index.js && node --check deploy-commands.js && node --check sheets.js && node --check commands/accept-cadet.js && node --check commands/help.js && node --check utils/startupValidation.js"
   },
-  "keywords": [],
+  "keywords": [
+    "discord",
+    "google-sheets",
+    "orion"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "discord.js": "^14.25.1",
     "dotenv": "^17.3.1",

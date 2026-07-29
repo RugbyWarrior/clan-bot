@@ -1,16 +1,16 @@
 async function sendLog(guild, channelId, message) {
-  if (!channelId) return;
+  if (!guild || !channelId) return;
 
   try {
     const channel = await guild.channels.fetch(channelId);
-    if (!channel) return;
+    if (!channel?.isTextBased()) return;
 
     await channel.send({
       content: message,
-      allowedMentions: { users: [] },
+      allowedMentions: { parse: [] },
     });
   } catch (error) {
-    console.error('Failed to send log message:', error);
+    console.error('Failed to send Orion log message:', error);
   }
 }
 

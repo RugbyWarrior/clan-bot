@@ -1,3 +1,21 @@
-node_modules
+node_modules/
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Google/service credentials
 service-account.json
+service-account-*.json
+credentials.json
+credentials-*.json
+
+# Private keys
+*.pem
+*.key
+
+# Logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db

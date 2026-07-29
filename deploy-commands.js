@@ -1,47 +1,52 @@
 require('dotenv').config();
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { REST, Routes } = require('discord.js');
 
-const commands = [];
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+const required = ['DISCORD_TOKEN', 'CLIENT_ID', 'GUILD_ID'];
+const missing = required.filter(key => !String(process.env[key] || '').trim());
 
-for (const file of commandFiles) {
-  const filePath = path.join(commandsPath, file);
-
-  try {
-    const command = require(filePath);
-
-    if (!command || !command.data || typeof command.data.toJSON !== 'function') {
-      console.error(`Invalid command export in file: ${file}`);
-      continue;
-    }
-
-    commands.push(command.data.toJSON());
-    console.log(`Loaded command: ${file}`);
-  } catch (error) {
-    console.error(`Failed to load command file: ${file}`);
-    console.error(error);
-  }
+if (missing.length > 0) {
+  console.error(`Missing required .env value(s): ${missing.join(', ')}`);
+  process.exit(1);
 }
 
-const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+const commands = [];
+const commandsPath = path.join(__dirname, 'commands');
+const commandFiles = fs
+  .readdirSync(commandsPath)
+  .filter(file => file.endsWith('.js'));
+
+for (const file of commandFiles) {
+  const command = require(path.join(commandsPath, file));
+
+  if (!command?.data || typeof command.data.toJSON !== 'function') {
+    console.warn(`Skipped invalid command file: ${file}`);
+    continue;
+  }
+
+  commands.push(command.data.toJSON());
+  console.log(`Prepared /${command.data.name}`);
+}
+
+const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    console.log(`Registering ${commands.length} slash commands...`);
+    console.log(`Registering ${commands.length} Orion guild command(s)...`);
 
     await rest.put(
       Routes.applicationGuildCommands(
-        process.env.CLIENT_ID,
-        process.env.GUILD_ID
+        process.env.CLIENT_ID.trim(),
+        process.env.GUILD_ID.trim()
       ),
       { body: commands }
     );
 
-    console.log('Successfully registered application commands.');
+    console.log('Orion slash commands registered successfully.');
   } catch (error) {
-    console.error(error);
+    console.error('Command registration failed:', error);
+    process.exitCode = 1;
   }
 })();

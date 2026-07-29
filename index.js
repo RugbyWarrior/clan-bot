@@ -1,11 +1,16 @@
 require('dotenv').config();
+
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const {
+  Client,
+  Collection,
+  Events,
+  GatewayIntentBits,
+} = require('discord.js');
 const { printStartupValidationReport } = require('./utils/startupValidation');
 
 const startupCheck = printStartupValidationReport();
-
 if (startupCheck.status !== 'valid') {
   process.exit(1);
 }
@@ -20,7 +25,9 @@ const client = new Client({
 client.commands = new Collection();
 
 const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+const commandFiles = fs
+  .readdirSync(commandsPath)
+  .filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
@@ -28,51 +35,24 @@ for (const file of commandFiles) {
   try {
     const command = require(filePath);
 
-    if ('data' in command && 'execute' in command) {
-      client.commands.set(command.data.name, command);
-      console.log(`Loaded command: ${command.data.name} (${file})`);
-    } else {
+    if (!command?.data || typeof command.execute !== 'function') {
       console.warn(`Skipped invalid command file: ${file}`);
+      continue;
     }
+
+    client.commands.set(command.data.name, command);
+    console.log(`Loaded command: ${command.data.name}`);
   } catch (error) {
     console.error(`Failed to load command file: ${file}`);
     console.error(error);
   }
 }
 
-client.once(Events.ClientReady, async readyClient => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
-
-  try {
-    const guilds = await readyClient.guilds.fetch();
-
-    for (const [, guildPreview] of guilds) {
-      try {
-        const guild = await readyClient.guilds.fetch(guildPreview.id);
-        await guild.members.fetch();
-        console.log(`Cached ${guild.members.cache.size} members for guild: ${guild.name}`);
-      } catch (guildError) {
-        console.error(`Failed to cache members for guild ${guildPreview.id}:`, guildError);
-      }
-    }
-  } catch (error) {
-    console.error('Failed to preload guild members:', error);
-  }
+client.once(Events.ClientReady, readyClient => {
+  console.log(`Orion logged in as ${readyClient.user.tag}`);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  if (interaction.isAutocomplete()) {
-    const command = client.commands.get(interaction.commandName);
-    if (!command || !command.autocomplete) return;
-
-    try {
-      await command.autocomplete(interaction);
-    } catch (error) {
-      console.error('Autocomplete error:', error);
-    }
-    return;
-  }
-
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);
@@ -81,24 +61,26 @@ client.on(Events.InteractionCreate, async interaction => {
   try {
     await command.execute(interaction);
   } catch (error) {
-    console.error(error);
+    console.error(`Unhandled error in /${interaction.commandName}:`, error);
 
-    const message = 'Error executing command. Check permissions, role hierarchy, IDs, and config.';
+    const message = '❌ Orion could not complete that command. Check the console and bot log channel.';
 
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
           content: message,
           ephemeral: true,
+          allowedMentions: { parse: [] },
         });
       } else {
         await interaction.reply({
           content: message,
           ephemeral: true,
+          allowedMentions: { parse: [] },
         });
       }
     } catch (replyError) {
-      console.error('Failed to send error response:', replyError);
+      console.error('Failed to send the interaction error message:', replyError);
     }
   }
 });
