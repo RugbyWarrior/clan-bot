@@ -1,5 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { sendLog } = require('../logger');
+const { canUseHqCommand } = require('../utils/hqPermissions');
+
 const {
   getTraineeRows,
   getRatingsRows,
@@ -8,40 +10,34 @@ const {
   deleteTraineeRow,
   sortRatingsSheet,
 } = require('../sheets');
+
 const { mosConfig } = require('../mosConfig');
 
-const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
-const HQ_ROLE_ID = process.env.HQ_ROLE_ID;
-const RATINGS_SHEET_NAME = process.env.RATINGS_SHEET_NAME || 'Ratings';
+const RATINGS_SHEET_NAME =
+  process.env.RATINGS_SHEET_NAME || 'Ratings';
+
 const TRAINEE_ROLE_ID = process.env.TRAINEE_ROLE_ID;
 const EX_SKIRA_ROLE_ID = process.env.EX_SKIRA_ROLE_ID;
 
-function canUseHqCommand(interaction) {
-  return (
-    interaction.channelId === HQ_CHANNEL_ID &&
-    interaction.member?.roles?.cache?.has(HQ_ROLE_ID)
-  );
-}
-
 function getRankOrder(rankLabel) {
   const order = {
-    'Brigadier': 1,
-    'Colonel': 2,
-    'Major': 3,
-    'Captain': 4,
-    'Lieutenant': 5,
+    Brigadier: 1,
+    Colonel: 2,
+    Major: 3,
+    Captain: 4,
+    Lieutenant: 5,
     'Squadron Leader': 6,
     'S/L': 6,
     'Second Lieutenant': 7,
     '2LT': 7,
     'Flight Lieutenant': 8,
     'Warrant Officer 1': 9,
-    'WO1': 9,
+    WO1: 9,
     'Warrant Officer 2': 10,
-    'WO2': 10,
+    WO2: 10,
     'Staff Sergeant': 11,
-    'Sergeant': 12,
-    'Corporal': 13,
+    Sergeant: 12,
+    Corporal: 13,
     'Flying Officer': 14,
     'Flight Officer': 14,
     'F/O': 14,
@@ -50,8 +46,8 @@ function getRankOrder(rankLabel) {
     'Armour Trooper': 17,
     'Officer Cadet': 18,
     'Armour Cadet': 19,
-    'Private': 20,
-    'Trainee': 99,
+    Private: 20,
+    Trainee: 99,
     'Ex Skira': 999,
   };
 
@@ -59,15 +55,29 @@ function getRankOrder(rankLabel) {
 }
 
 function getDisplayNameWithoutRank(member) {
-  const displayName = member.nickname || member.user.username;
-  if (!displayName.includes(' ')) return displayName;
+  const displayName =
+    member.nickname || member.user.username;
+
+  if (!displayName.includes(' ')) {
+    return displayName;
+  }
+
   return displayName.replace(/^\S+\s+/, '').trim();
 }
 
 function getSheetSquadronName(member) {
-  if (member.roles.cache.has(process.env.INFANTRY_ROLE_ID)) return '3rd Rifles';
-  if (member.roles.cache.has(process.env.ARMOUR_ROLE_ID)) return '20th Hussars';
-  if (member.roles.cache.has(process.env.AVIATION_ROLE_ID)) return '230th Aviation';
+  if (member.roles.cache.has(process.env.INFANTRY_ROLE_ID)) {
+    return '3rd Rifles';
+  }
+
+  if (member.roles.cache.has(process.env.ARMOUR_ROLE_ID)) {
+    return '20th Hussars';
+  }
+
+  if (member.roles.cache.has(process.env.AVIATION_ROLE_ID)) {
+    return '230th Aviation';
+  }
+
   return '';
 }
 
@@ -79,7 +89,8 @@ function getAllowedRankRole(member, guild) {
 
   for (const roleId of rankRoleIds) {
     if (!roleId) continue;
-    if (roleId === TRAINEE_ROLE_ID || roleId === EX_SKIRA_ROLE_ID) continue;
+    if (roleId === TRAINEE_ROLE_ID) continue;
+    if (roleId === EX_SKIRA_ROLE_ID) continue;
 
     if (member.roles.cache.has(roleId)) {
       return guild.roles.cache.get(roleId) || null;
@@ -131,7 +142,10 @@ function getMosSheetValue(member, guild, mos) {
 
     if (member.roles.cache.has(roleId)) {
       const roleObject = guild.roles.cache.get(roleId);
-      return roleObject ? roleObject.name : ratingName;
+
+      return roleObject
+        ? roleObject.name
+        : ratingName;
     }
   }
 
@@ -161,21 +175,36 @@ function buildNameCandidatesFromRaw(raw) {
 
     const parts = spaced.split(' ').filter(Boolean);
 
-    if (parts.length > 0) candidates.add(parts[0]);
-    if (parts.length > 1) candidates.add(parts.slice(0, 2).join(''));
-    if (parts.length > 1) candidates.add(parts.slice(0, 2).join(' '));
-    if (parts.length > 0) candidates.add(parts.join(''));
+    if (parts.length > 0) {
+      candidates.add(parts[0]);
+    }
+
+    if (parts.length > 1) {
+      candidates.add(parts.slice(0, 2).join(''));
+      candidates.add(parts.slice(0, 2).join(' '));
+    }
+
+    if (parts.length > 0) {
+      candidates.add(parts.join(''));
+    }
   }
 
   return [...candidates];
 }
 
-function getUniqueMatchesByCandidates(candidateMap, candidates, extraFilter = null) {
+function getUniqueMatchesByCandidates(
+  candidateMap,
+  candidates,
+  extraFilter = null
+) {
   const matches = new Map();
 
   for (const candidate of candidates) {
     for (const match of candidateMap.get(candidate) || []) {
-      if (extraFilter && !extraFilter(match)) continue;
+      if (extraFilter && !extraFilter(match)) {
+        continue;
+      }
+
       matches.set(match.rowNumber, match);
     }
   }
@@ -186,7 +215,9 @@ function getUniqueMatchesByCandidates(candidateMap, candidates, extraFilter = nu
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('syncall')
-    .setDescription('Safely sync ranked Discord members into the Ratings sheet and remove promoted trainee rows.'),
+    .setDescription(
+      'Safely sync ranked Discord members into the Ratings sheet and remove promoted trainee rows.'
+    ),
 
   async execute(interaction) {
     await interaction.deferReply({
@@ -197,17 +228,23 @@ module.exports = {
     try {
       if (!canUseHqCommand(interaction)) {
         return interaction.editReply({
-          content: '❌ This command can only be used by the Headquarters role in the HQ channel.',
+          content:
+            '❌ This command can only be used by authorised Headquarters staff in the HQ channel.',
           allowedMentions: { users: [] },
         });
       }
 
-      const allMembers = interaction.guild.members.cache.filter(member => !member.user.bot);
+      const allMembers =
+        interaction.guild.members.cache.filter(
+          member => !member.user.bot
+        );
+
       const traineeRows = await getTraineeRows();
       const ratingsRows = await getRatingsRows();
 
       const traineeByDiscordId = new Map();
       const traineeByCandidate = new Map();
+
       const ratingsByDiscordId = new Map();
       const ratingsByCandidate = new Map();
 
@@ -215,7 +252,8 @@ module.exports = {
         const row = traineeRows[i] || [];
         const rowNumber = i + 1;
         const rowName = row[0] || '';
-        const rowDiscordId = (row[8] || '').toString().trim();
+        const rowDiscordId =
+          (row[8] || '').toString().trim();
 
         const record = {
           rowNumber,
@@ -223,13 +261,25 @@ module.exports = {
         };
 
         if (rowDiscordId) {
-          traineeByDiscordId.set(rowDiscordId, record);
+          traineeByDiscordId.set(
+            rowDiscordId,
+            record
+          );
         }
 
-        for (const candidate of buildNameCandidatesFromRaw(rowName)) {
+        for (
+          const candidate of
+          buildNameCandidatesFromRaw(rowName)
+        ) {
           if (!candidate) continue;
-          if (!traineeByCandidate.has(candidate)) traineeByCandidate.set(candidate, []);
-          traineeByCandidate.get(candidate).push(record);
+
+          if (!traineeByCandidate.has(candidate)) {
+            traineeByCandidate.set(candidate, []);
+          }
+
+          traineeByCandidate
+            .get(candidate)
+            .push(record);
         }
       }
 
@@ -237,7 +287,8 @@ module.exports = {
         const row = ratingsRows[i] || [];
         const rowNumber = i + 1;
         const rowName = row[2] || '';
-        const rowDiscordId = (row[18] || '').toString().trim();
+        const rowDiscordId =
+          (row[18] || '').toString().trim();
 
         const record = {
           rowNumber,
@@ -245,19 +296,33 @@ module.exports = {
         };
 
         if (rowDiscordId) {
-          ratingsByDiscordId.set(rowDiscordId, record);
+          ratingsByDiscordId.set(
+            rowDiscordId,
+            record
+          );
         }
 
-        for (const candidate of buildNameCandidatesFromRaw(rowName)) {
+        for (
+          const candidate of
+          buildNameCandidatesFromRaw(rowName)
+        ) {
           if (!candidate) continue;
-          if (!ratingsByCandidate.has(candidate)) ratingsByCandidate.set(candidate, []);
-          ratingsByCandidate.get(candidate).push(record);
+
+          if (!ratingsByCandidate.has(candidate)) {
+            ratingsByCandidate.set(candidate, []);
+          }
+
+          ratingsByCandidate
+            .get(candidate)
+            .push(record);
         }
       }
 
       const ratingsUpdates = [];
       const traineeRowsToDelete = [];
-      let nextNewRatingsRow = ratingsRows.length + 1;
+
+      let nextNewRatingsRow =
+        ratingsRows.length + 1;
 
       let createdRows = 0;
       let updatedRows = 0;
@@ -270,56 +335,93 @@ module.exports = {
       let skippedAmbiguousTrainees = 0;
 
       for (const member of allMembers.values()) {
-        if (TRAINEE_ROLE_ID && member.roles.cache.has(TRAINEE_ROLE_ID)) {
+        if (
+          TRAINEE_ROLE_ID &&
+          member.roles.cache.has(TRAINEE_ROLE_ID)
+        ) {
           skippedTrainees++;
           continue;
         }
 
-        if (EX_SKIRA_ROLE_ID && member.roles.cache.has(EX_SKIRA_ROLE_ID)) {
+        if (
+          EX_SKIRA_ROLE_ID &&
+          member.roles.cache.has(EX_SKIRA_ROLE_ID)
+        ) {
           skippedExSkira++;
           continue;
         }
 
-        const rankRole = getAllowedRankRole(member, interaction.guild);
+        const rankRole =
+          getAllowedRankRole(
+            member,
+            interaction.guild
+          );
+
         if (!rankRole) {
           skippedNoAllowedRank++;
           continue;
         }
 
-        const squadronName = getSheetSquadronName(member);
-        const memberCandidates = buildNameCandidatesFromRaw(member.nickname || member.user.username);
+        const squadronName =
+          getSheetSquadronName(member);
 
-        let ratingsRow = ratingsByDiscordId.get(member.id) || null;
+        const memberCandidates =
+          buildNameCandidatesFromRaw(
+            member.nickname ||
+            member.user.username
+          );
+
+        let ratingsRow =
+          ratingsByDiscordId.get(member.id) ||
+          null;
 
         if (!ratingsRow) {
-          const ratingMatches = getUniqueMatchesByCandidates(
-            ratingsByCandidate,
-            memberCandidates,
-            match => {
-              const existingDiscordId = (match.rowValues[18] || '').toString().trim();
-              return !existingDiscordId || existingDiscordId === member.id;
-            }
-          );
+          const ratingMatches =
+            getUniqueMatchesByCandidates(
+              ratingsByCandidate,
+              memberCandidates,
+              match => {
+                const existingDiscordId =
+                  (
+                    match.rowValues[18] ||
+                    ''
+                  )
+                    .toString()
+                    .trim();
+
+                return (
+                  !existingDiscordId ||
+                  existingDiscordId === member.id
+                );
+              }
+            );
 
           if (ratingMatches.length === 1) {
             ratingsRow = ratingMatches[0];
-          } else if (ratingMatches.length > 1) {
+          } else if (
+            ratingMatches.length > 1
+          ) {
             skippedAmbiguousRatings++;
             continue;
           }
         }
 
-        let traineeRow = traineeByDiscordId.get(member.id) || null;
+        let traineeRow =
+          traineeByDiscordId.get(member.id) ||
+          null;
 
         if (!traineeRow) {
-          const traineeMatches = getUniqueMatchesByCandidates(
-            traineeByCandidate,
-            memberCandidates
-          );
+          const traineeMatches =
+            getUniqueMatchesByCandidates(
+              traineeByCandidate,
+              memberCandidates
+            );
 
           if (traineeMatches.length === 1) {
             traineeRow = traineeMatches[0];
-          } else if (traineeMatches.length > 1) {
+          } else if (
+            traineeMatches.length > 1
+          ) {
             skippedAmbiguousTrainees++;
             continue;
           }
@@ -336,11 +438,19 @@ module.exports = {
           getDisplayNameWithoutRank(member);
 
         const existingSteamId64 =
-          (ratingsRow?.rowValues?.[19] || '').toString().trim() ||
-          (traineeRow?.rowValues?.[3] || '').toString().trim() ||
+          (
+            ratingsRow?.rowValues?.[19] ||
+            ''
+          ).toString().trim() ||
+          (
+            traineeRow?.rowValues?.[3] ||
+            ''
+          ).toString().trim() ||
           '';
 
-        const targetRowNumber = ratingsRow ? ratingsRow.rowNumber : nextNewRatingsRow++;
+        const targetRowNumber = ratingsRow
+          ? ratingsRow.rowNumber
+          : nextNewRatingsRow++;
 
         if (ratingsRow) {
           updatedRows++;
@@ -348,41 +458,69 @@ module.exports = {
           createdRows++;
         }
 
-        const rowUpdate = new Array(21).fill('');
+        const rowUpdate =
+          new Array(21).fill('');
+
         rowUpdate[0] = rankRole.name;
         rowUpdate[1] = squadronName;
         rowUpdate[2] = finalName;
 
-        for (const config of Object.values(mosConfig)) {
-          const column = resolveSheetColumn(config.sheetColumn);
+        for (
+          const config of
+          Object.values(mosConfig)
+        ) {
+          const column =
+            resolveSheetColumn(
+              config.sheetColumn
+            );
+
           if (!column) continue;
 
-          const index = column.charCodeAt(0) - 65;
-          rowUpdate[index] = getMosSheetValue(member, interaction.guild, config);
+          const index =
+            column.charCodeAt(0) - 65;
+
+          rowUpdate[index] =
+            getMosSheetValue(
+              member,
+              interaction.guild,
+              config
+            );
         }
 
         rowUpdate[18] = member.id;
         rowUpdate[19] = existingSteamId64;
-        rowUpdate[20] = getRankOrder(rankRole.name);
+        rowUpdate[20] =
+          getRankOrder(rankRole.name);
 
         ratingsUpdates.push({
-          range: `${RATINGS_SHEET_NAME}!A${targetRowNumber}:U${targetRowNumber}`,
+          range:
+            `${RATINGS_SHEET_NAME}!A${targetRowNumber}:U${targetRowNumber}`,
           values: [rowUpdate],
         });
 
         if (traineeRow) {
-          traineeRowsToDelete.push(traineeRow.rowNumber);
+          traineeRowsToDelete.push(
+            traineeRow.rowNumber
+          );
         }
       }
 
       if (ratingsUpdates.length > 0) {
-        await batchUpdateRatingsCells(ratingsUpdates);
+        await batchUpdateRatingsCells(
+          ratingsUpdates
+        );
+
         await sortRatingsSheet();
       }
 
-      const uniqueRowsToDelete = [...new Set(traineeRowsToDelete)].sort((a, b) => b - a);
+      const uniqueRowsToDelete =
+        [...new Set(traineeRowsToDelete)]
+          .sort((a, b) => b - a);
 
-      for (const rowNumber of uniqueRowsToDelete) {
+      for (
+        const rowNumber of
+        uniqueRowsToDelete
+      ) {
         await deleteTraineeRow(rowNumber);
         removedTraineeRows++;
       }
@@ -401,7 +539,7 @@ module.exports = {
           `**Skipped No Safe Match:** ${skippedNoSafeMatch}`,
           `**Skipped Ambiguous Ratings:** ${skippedAmbiguousRatings}`,
           `**Skipped Ambiguous Trainees:** ${skippedAmbiguousTrainees}`,
-          `**Sorted Ratings Sheet:** Yes`,
+          '**Sorted Ratings Sheet:** Yes',
           `**Done By:** ${interaction.user.tag}`,
           `**Channel:** <#${interaction.channelId}>`,
         ].join('\n')
@@ -419,14 +557,18 @@ module.exports = {
           `Skipped no safe match: **${skippedNoSafeMatch}**\n` +
           `Skipped ambiguous Ratings: **${skippedAmbiguousRatings}**\n` +
           `Skipped ambiguous Trainees: **${skippedAmbiguousTrainees}**\n` +
-          `Sorted Ratings sheet: **Yes**`,
+          'Sorted Ratings sheet: **Yes**',
         allowedMentions: { users: [] },
       });
     } catch (error) {
-      console.error('Error in /syncall:', error);
+      console.error(
+        'Error in /syncall:',
+        error
+      );
 
       return interaction.editReply({
-        content: '❌ There was an error while running /syncall.',
+        content:
+          '❌ There was an error while running /syncall.',
         allowedMentions: { users: [] },
       });
     }

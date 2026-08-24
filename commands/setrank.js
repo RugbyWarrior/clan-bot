@@ -2,7 +2,9 @@ const { SlashCommandBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { sendLog } = require('../logger');
 const { updateNickname } = require('../utils/updateNickname');
+const { canUseHqCommand } = require('../utils/hqPermissions');
 const { sortRatingsSheet } = require('../sheets');
+
 const {
   findRatingsRowByDiscordId,
   writeRatingsRow,
@@ -12,14 +14,13 @@ const {
   deleteTraineeRow,
 } = require('../sheets');
 
-const HQ_CHANNEL_ID = process.env.HQ_CHANNEL_ID;
-const HQ_ROLE_ID = process.env.HQ_ROLE_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
 const RATINGS_SHEET_NAME = (process.env.RATINGS_SHEET_NAME || 'Ratings').trim();
 const TRAINEE_SHEET_NAME = (process.env.TRAINEE_SHEET_NAME || 'Trainees').trim();
 
 const TRAINEE_SPREADSHEET_ID = (process.env.TRAINEE_SPREADSHEET_ID || '').trim();
+
 const RATINGS_SPREADSHEET_ID = (
   process.env.RATINGS_SPREADSHEET_ID ||
   process.env.MOS_SPREADSHEET_ID ||
@@ -27,37 +28,25 @@ const RATINGS_SPREADSHEET_ID = (
   ''
 ).trim();
 
-function canUseHqCommand(interaction) {
-  if (!HQ_CHANNEL_ID || !HQ_ROLE_ID) return false;
-
-  return (
-    interaction.channelId === HQ_CHANNEL_ID &&
-    interaction.member &&
-    interaction.member.roles &&
-    interaction.member.roles.cache &&
-    interaction.member.roles.cache.has(HQ_ROLE_ID)
-  );
-}
-
 function getRankOrder(rankLabel) {
   const order = {
-    'Brigadier': 1,
-    'Colonel': 2,
-    'Major': 3,
-    'Captain': 4,
-    'Lieutenant': 5,
+    Brigadier: 1,
+    Colonel: 2,
+    Major: 3,
+    Captain: 4,
+    Lieutenant: 5,
     'Squadron Leader': 6,
     'S/L': 6,
     'Second Lieutenant': 7,
     '2LT': 7,
     'Flight Lieutenant': 8,
     'Warrant Officer 1': 9,
-    'WO1': 9,
+    WO1: 9,
     'Warrant Officer 2': 10,
-    'WO2': 10,
+    WO2: 10,
     'Staff Sergeant': 11,
-    'Sergeant': 12,
-    'Corporal': 13,
+    Sergeant: 12,
+    Corporal: 13,
     'Flying Officer': 14,
     'Flight Officer': 14,
     'F/O': 14,
@@ -66,8 +55,8 @@ function getRankOrder(rankLabel) {
     'Armour Trooper': 17,
     'Officer Cadet': 18,
     'Armour Cadet': 19,
-    'Private': 20,
-    'Trainee': 99,
+    Private: 20,
+    Trainee: 99,
     'Ex Skira': 999,
   };
 
@@ -76,14 +65,27 @@ function getRankOrder(rankLabel) {
 
 function getDisplayNameWithoutRank(member) {
   const displayName = member.nickname || member.user.username;
-  if (!displayName.includes(' ')) return displayName;
+
+  if (!displayName.includes(' ')) {
+    return displayName;
+  }
+
   return displayName.replace(/^\S+\s+/, '').trim();
 }
 
 function getSheetSquadronName(member) {
-  if (member.roles.cache.has(process.env.INFANTRY_ROLE_ID)) return '3rd Rifles';
-  if (member.roles.cache.has(process.env.ARMOUR_ROLE_ID)) return '20th Hussars';
-  if (member.roles.cache.has(process.env.AVIATION_ROLE_ID)) return '230th Aviation';
+  if (member.roles.cache.has(process.env.INFANTRY_ROLE_ID)) {
+    return '3rd Rifles';
+  }
+
+  if (member.roles.cache.has(process.env.ARMOUR_ROLE_ID)) {
+    return '20th Hussars';
+  }
+
+  if (member.roles.cache.has(process.env.AVIATION_ROLE_ID)) {
+    return '230th Aviation';
+  }
+
   return '';
 }
 
@@ -91,6 +93,7 @@ function formatUkDate(date = new Date()) {
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = String(date.getFullYear());
+
   return `${day}/${month}/${year}`;
 }
 
@@ -116,7 +119,7 @@ async function getSheetId(spreadsheetId, sheetName) {
   });
 
   const targetSheet = response.data.sheets.find(
-    s => s.properties.title === sheetName
+    sheet => sheet.properties.title === sheetName
   );
 
   if (!targetSheet) {
@@ -177,9 +180,17 @@ async function deleteRatingsRowByDiscordId(discordId) {
   if (!discordId) return null;
 
   const ratingsRow = await findRatingsRowByDiscordId(discordId);
-  if (!ratingsRow) return null;
 
-  await deleteSheetRow(RATINGS_SPREADSHEET_ID, RATINGS_SHEET_NAME, ratingsRow.rowNumber);
+  if (!ratingsRow) {
+    return null;
+  }
+
+  await deleteSheetRow(
+    RATINGS_SPREADSHEET_ID,
+    RATINGS_SHEET_NAME,
+    ratingsRow.rowNumber
+  );
+
   return ratingsRow.rowNumber;
 }
 
@@ -206,7 +217,9 @@ async function upsertTraineeRow({ name, steamId64, discordId }) {
   if (!targetRowNumber) {
     const firstEmpty = rows.findIndex((row, index) => {
       if (index === 0) return false;
+
       const safeRow = row || [];
+
       return safeRow.every(cell => !String(cell || '').trim());
     });
 
@@ -250,6 +263,7 @@ const rankConfig = {
     nicknamePrefix: null,
     exSkiraSuffix: true,
   },
+
   TRAINEE: {
     label: 'Trainee',
     roleEnv: 'TRAINEE_ROLE_ID',
@@ -271,6 +285,7 @@ const rankConfig = {
     nicknamePrefix: 'PVT',
     exSkiraSuffix: false,
   },
+
   ARMOUR_CADET: {
     label: 'Armour Cadet',
     roleEnv: 'ARMOUR_CADET_ROLE_ID',
@@ -281,6 +296,7 @@ const rankConfig = {
     nicknamePrefix: 'CDT',
     exSkiraSuffix: false,
   },
+
   OFFICER_CADET: {
     label: 'Officer Cadet',
     roleEnv: 'OFFICER_CADET_ROLE_ID',
@@ -291,6 +307,7 @@ const rankConfig = {
     nicknamePrefix: 'O/CDT',
     exSkiraSuffix: false,
   },
+
   ARMOUR_TROOPER: {
     label: 'Armour Trooper',
     roleEnv: 'ARMOUR_TROOPER_ROLE_ID',
@@ -301,6 +318,7 @@ const rankConfig = {
     nicknamePrefix: 'TPR',
     exSkiraSuffix: false,
   },
+
   PILOT_OFFICER: {
     label: 'Pilot Officer',
     roleEnv: 'PILOT_OFFICER_ROLE_ID',
@@ -311,6 +329,7 @@ const rankConfig = {
     nicknamePrefix: 'P/O',
     exSkiraSuffix: false,
   },
+
   LANCE_CORPORAL: {
     label: 'Lance Corporal',
     roleEnv: 'LANCE_CORPORAL_ROLE_ID',
@@ -332,6 +351,7 @@ const rankConfig = {
     nicknamePrefix: 'F/O',
     exSkiraSuffix: false,
   },
+
   CORPORAL: {
     label: 'Corporal',
     roleEnv: 'CORPORAL_ROLE_ID',
@@ -347,17 +367,26 @@ const rankConfig = {
     label: 'Sergeant',
     roleEnv: 'SERGEANT_ROLE_ID',
     breakerEnv: 'SENIOR_NCO_BREAKER_ROLE_ID',
-    allowedSquadrons: ['INFANTRY_ROLE_ID', 'ARMOUR_ROLE_ID', 'AVIATION_ROLE_ID'],
+    allowedSquadrons: [
+      'INFANTRY_ROLE_ID',
+      'ARMOUR_ROLE_ID',
+      'AVIATION_ROLE_ID',
+    ],
     traineeState: false,
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'SGT',
     exSkiraSuffix: false,
   },
+
   STAFF_SERGEANT: {
     label: 'Staff Sergeant',
     roleEnv: 'STAFF_SERGEANT_ROLE_ID',
     breakerEnv: 'SENIOR_NCO_BREAKER_ROLE_ID',
-    allowedSquadrons: ['INFANTRY_ROLE_ID', 'ARMOUR_ROLE_ID', 'AVIATION_ROLE_ID'],
+    allowedSquadrons: [
+      'INFANTRY_ROLE_ID',
+      'ARMOUR_ROLE_ID',
+      'AVIATION_ROLE_ID',
+    ],
     traineeState: false,
     autoInfantryFromTrainee: false,
     nicknamePrefix: 'SSGT',
@@ -370,12 +399,14 @@ module.exports = {
     .setName('setrank')
     .setDescription('Set a user rank role and sync them to the system.')
     .addUserOption(option =>
-      option.setName('user')
+      option
+        .setName('user')
         .setDescription('User to update')
         .setRequired(true)
     )
     .addStringOption(option =>
-      option.setName('rank')
+      option
+        .setName('rank')
         .setDescription('Rank to assign')
         .setRequired(true)
         .addChoices(
@@ -409,7 +440,8 @@ module.exports = {
     try {
       if (!canUseHqCommand(interaction)) {
         await interaction.editReply({
-          content: '❌ This command can only be used by the Headquarters role in the HQ channel.',
+          content:
+            '❌ This command can only be used by authorised Headquarters staff in the HQ channel.',
           allowedMentions: { users: [] },
         });
         return;
@@ -417,11 +449,14 @@ module.exports = {
 
       const user = interaction.options.getUser('user');
       const rankKey = interaction.options.getString('rank');
-      const providedSteamId64 = (interaction.options.getString('steamid64') || '').trim();
+      const providedSteamId64 = (
+        interaction.options.getString('steamid64') || ''
+      ).trim();
 
       let member = await interaction.guild.members.fetch(user.id);
 
       const selectedRank = rankConfig[rankKey];
+
       if (!selectedRank) {
         await interaction.editReply({
           content: '❌ That rank is not configured.',
@@ -431,6 +466,7 @@ module.exports = {
       }
 
       const targetRankRoleId = process.env[selectedRank.roleEnv];
+
       const breakerRoleToAdd = selectedRank.breakerEnv
         ? process.env[selectedRank.breakerEnv]
         : null;
@@ -483,7 +519,10 @@ module.exports = {
         traineeRow = await findTraineeRowByDiscordId(user.id);
 
         if (!traineeRow) {
-          const nameMatches = await findTraineeRowsByName(getDisplayNameWithoutRank(member));
+          const nameMatches = await findTraineeRowsByName(
+            getDisplayNameWithoutRank(member)
+          );
+
           if (nameMatches.length === 1) {
             traineeRow = nameMatches[0];
           }
@@ -491,11 +530,14 @@ module.exports = {
 
         if (traineeRow) {
           traineeSheetName = traineeRow.rowValues[0] || null;
-          traineeSteamId64 = (traineeRow.rowValues[3] || '').toString().trim();
+          traineeSteamId64 = (
+            traineeRow.rowValues[3] || ''
+          ).toString().trim();
         }
       }
 
       const existingRatingsRow = await findRatingsRowByDiscordId(user.id);
+
       const ratingsSteamId64 = existingRatingsRow
         ? (existingRatingsRow.rowValues?.[19] || '').toString().trim()
         : '';
@@ -504,7 +546,10 @@ module.exports = {
         const rolesToRemove = [];
 
         for (const rankRoleId of rankRoleIds) {
-          if (member.roles.cache.has(rankRoleId) && rankRoleId !== targetRankRoleId) {
+          if (
+            member.roles.cache.has(rankRoleId) &&
+            rankRoleId !== targetRankRoleId
+          ) {
             rolesToRemove.push(rankRoleId);
           }
         }
@@ -521,16 +566,25 @@ module.exports = {
           }
         }
 
-        if (skiraMemberRoleId && member.roles.cache.has(skiraMemberRoleId)) {
+        if (
+          skiraMemberRoleId &&
+          member.roles.cache.has(skiraMemberRoleId)
+        ) {
           rolesToRemove.push(skiraMemberRoleId);
         }
 
         if (rolesToRemove.length > 0) {
-          await member.roles.remove(rolesToRemove, 'Resetting member to trainee state');
+          await member.roles.remove(
+            rolesToRemove,
+            'Resetting member to trainee state'
+          );
         }
 
         if (!member.roles.cache.has(targetRankRoleId)) {
-          await member.roles.add(targetRankRoleId, 'Rank set to Trainee');
+          await member.roles.add(
+            targetRankRoleId,
+            'Rank set to Trainee'
+          );
         }
 
         if (!trainingCompanyRoleId) {
@@ -542,7 +596,10 @@ module.exports = {
         }
 
         if (!member.roles.cache.has(trainingCompanyRoleId)) {
-          await member.roles.add(trainingCompanyRoleId, 'Training Company role added for Trainee');
+          await member.roles.add(
+            trainingCompanyRoleId,
+            'Training Company role added for Trainee'
+          );
         }
 
         await updateNickname(member, {
@@ -550,7 +607,8 @@ module.exports = {
           exSkira: selectedRank.exSkiraSuffix,
         });
 
-        const ratingsRowDeleted = await deleteRatingsRowByDiscordId(user.id);
+        const ratingsRowDeleted =
+          await deleteRatingsRowByDiscordId(user.id);
 
         const steamId64ToWrite =
           providedSteamId64 ||
@@ -569,7 +627,11 @@ module.exports = {
             `✅ Set <@${user.id}> to **${selectedRank.label}** and added **Training Company**.\n` +
             `Trainee row updated: **${traineeRowNumber}**\n` +
             `SteamID64 used: **${steamId64ToWrite || 'Blank'}**\n` +
-            `Ratings row removed: **${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No existing row found'}**`,
+            `Ratings row removed: **${
+              ratingsRowDeleted
+                ? `Yes (row ${ratingsRowDeleted})`
+                : 'No existing row found'
+            }**`,
           allowedMentions: { users: [] },
         });
 
@@ -580,62 +642,87 @@ module.exports = {
             '**[SET RANK]**',
             `**User:** <@${user.id}> (${user.id})`,
             `**New Rank:** ${selectedRank.label}`,
-            `**Breaker Added:** None`,
-            `**Squadron Added:** None`,
-            `**Skira Member Removed:** ${skiraMemberRoleId ? 'Yes if present' : 'No config'}`,
-            `**Ratings Row Removed:** ${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No'}`,
+            '**Breaker Added:** None',
+            '**Squadron Added:** None',
+            `**Skira Member Removed:** ${
+              skiraMemberRoleId ? 'Yes if present' : 'No config'
+            }`,
+            `**Ratings Row Removed:** ${
+              ratingsRowDeleted
+                ? `Yes (row ${ratingsRowDeleted})`
+                : 'No'
+            }`,
             `**Trainee Row Upserted:** ${traineeRowNumber}`,
             `**SteamID64 Used:** ${steamId64ToWrite || 'Blank'}`,
             `**Done By:** ${interaction.user.tag}`,
             `**Channel:** <#${interaction.channelId}>`,
           ].join('\n')
         );
+
         return;
       }
 
-      const currentSquadronEnv = selectedRank.allowedSquadrons.find(envName => {
-        const roleId = process.env[envName];
-        return roleId && member.roles.cache.has(roleId);
-      });
+      const currentSquadronEnv =
+        selectedRank.allowedSquadrons.find(envName => {
+          const roleId = process.env[envName];
+
+          return roleId && member.roles.cache.has(roleId);
+        });
 
       let squadronRoleToAdd = null;
       let autoAssignedInfantry = false;
       let addedSkiraMember = false;
       let removedSkiraMember = false;
 
-      if (selectedRank.autoInfantryFromTrainee && wasCurrentlyTrainee) {
+      if (
+        selectedRank.autoInfantryFromTrainee &&
+        wasCurrentlyTrainee
+      ) {
         if (!infantryRoleId) {
           await interaction.editReply({
             content: '❌ Missing INFANTRY_ROLE_ID in .env',
             allowedMentions: { users: [] },
           });
+
           return;
         }
 
         squadronRoleToAdd = infantryRoleId;
         autoAssignedInfantry = true;
-      } else {
-        if (selectedRank.allowedSquadrons.length > 0 && !currentSquadronEnv) {
-          await interaction.editReply({
-            content: `❌ <@${user.id}> does not have the required squadron role for **${selectedRank.label}**.`,
-            allowedMentions: { users: [] },
-          });
-          return;
-        }
+      } else if (
+        selectedRank.allowedSquadrons.length > 0 &&
+        !currentSquadronEnv
+      ) {
+        await interaction.editReply({
+          content:
+            `❌ <@${user.id}> does not have the required squadron role for **${selectedRank.label}**.`,
+          allowedMentions: { users: [] },
+        });
+
+        return;
       }
 
       const rolesToRemove = [];
 
-      if (traineeRoleId && member.roles.cache.has(traineeRoleId)) {
+      if (
+        traineeRoleId &&
+        member.roles.cache.has(traineeRoleId)
+      ) {
         rolesToRemove.push(traineeRoleId);
       }
 
-      if (trainingCompanyRoleId && member.roles.cache.has(trainingCompanyRoleId)) {
+      if (
+        trainingCompanyRoleId &&
+        member.roles.cache.has(trainingCompanyRoleId)
+      ) {
         rolesToRemove.push(trainingCompanyRoleId);
       }
 
       for (const rankRoleId of rankRoleIds) {
-        if (member.roles.cache.has(rankRoleId) && rankRoleId !== targetRankRoleId) {
+        if (
+          member.roles.cache.has(rankRoleId) &&
+          rankRoleId !== targetRankRoleId
+        ) {
           rolesToRemove.push(rankRoleId);
         }
       }
@@ -648,38 +735,69 @@ module.exports = {
 
       if (squadronRoleToAdd) {
         for (const squadronRoleId of squadronRoleIds) {
-          if (member.roles.cache.has(squadronRoleId) && squadronRoleId !== squadronRoleToAdd) {
+          if (
+            member.roles.cache.has(squadronRoleId) &&
+            squadronRoleId !== squadronRoleToAdd
+          ) {
             rolesToRemove.push(squadronRoleId);
           }
         }
       }
 
-      if (rankKey === 'EX_SKIRA' && skiraMemberRoleId && member.roles.cache.has(skiraMemberRoleId)) {
+      if (
+        rankKey === 'EX_SKIRA' &&
+        skiraMemberRoleId &&
+        member.roles.cache.has(skiraMemberRoleId)
+      ) {
         rolesToRemove.push(skiraMemberRoleId);
         removedSkiraMember = true;
       }
 
       if (rolesToRemove.length > 0) {
-        await member.roles.remove(rolesToRemove, 'Cleaning old rank, breaker, trainee, and squadron roles');
+        await member.roles.remove(
+          rolesToRemove,
+          'Cleaning old rank, breaker, trainee, and squadron roles'
+        );
       }
 
       if (!member.roles.cache.has(targetRankRoleId)) {
-        await member.roles.add(targetRankRoleId, `Rank set to ${selectedRank.label}`);
+        await member.roles.add(
+          targetRankRoleId,
+          `Rank set to ${selectedRank.label}`
+        );
       }
 
-      if (breakerRoleToAdd && !member.roles.cache.has(breakerRoleToAdd)) {
-        await member.roles.add(breakerRoleToAdd, `Breaker role added for ${selectedRank.label}`);
+      if (
+        breakerRoleToAdd &&
+        !member.roles.cache.has(breakerRoleToAdd)
+      ) {
+        await member.roles.add(
+          breakerRoleToAdd,
+          `Breaker role added for ${selectedRank.label}`
+        );
       }
 
-      if (squadronRoleToAdd && !member.roles.cache.has(squadronRoleToAdd)) {
-        await member.roles.add(squadronRoleToAdd, 'Auto-assigned Infantry on first promotion from trainee');
+      if (
+        squadronRoleToAdd &&
+        !member.roles.cache.has(squadronRoleToAdd)
+      ) {
+        await member.roles.add(
+          squadronRoleToAdd,
+          'Auto-assigned Infantry on first promotion from trainee'
+        );
       }
 
-      if (wasCurrentlyTrainee && skiraMemberRoleId && !member.roles.cache.has(skiraMemberRoleId) && rankKey !== 'EX_SKIRA') {
+      if (
+        wasCurrentlyTrainee &&
+        skiraMemberRoleId &&
+        !member.roles.cache.has(skiraMemberRoleId) &&
+        rankKey !== 'EX_SKIRA'
+      ) {
         await member.roles.add(
           skiraMemberRoleId,
           'Skira Member role added on first promotion from trainee'
         );
+
         addedSkiraMember = true;
       }
 
@@ -691,50 +809,65 @@ module.exports = {
       member = await interaction.guild.members.fetch(user.id);
 
       const squadronName = getSheetSquadronName(member);
+
       let breakerName = 'None';
 
-      let replyMessage = `✅ Set <@${user.id}> to rank **${selectedRank.label}**.`;
+      let replyMessage =
+        `✅ Set <@${user.id}> to rank **${selectedRank.label}**.`;
 
       if (breakerRoleToAdd) {
-        const breakerRole = interaction.guild.roles.cache.get(breakerRoleToAdd);
+        const breakerRole =
+          interaction.guild.roles.cache.get(breakerRoleToAdd);
+
         if (breakerRole) {
           breakerName = breakerRole.name;
-          replyMessage += ` Added breaker role **${breakerRole.name}**.`;
+          replyMessage +=
+            ` Added breaker role **${breakerRole.name}**.`;
         }
       }
 
       if (squadronRoleToAdd) {
-        const squadronRole = interaction.guild.roles.cache.get(squadronRoleToAdd);
+        const squadronRole =
+          interaction.guild.roles.cache.get(squadronRoleToAdd);
+
         if (squadronRole) {
-          replyMessage += ` Added squadron role **${squadronRole.name}**.`;
+          replyMessage +=
+            ` Added squadron role **${squadronRole.name}**.`;
         }
       }
 
       if (autoAssignedInfantry) {
-        replyMessage += ` Infantry was auto-assigned because they were promoted from trainee.`;
+        replyMessage +=
+          ' Infantry was auto-assigned because they were promoted from trainee.';
       }
 
       if (addedSkiraMember) {
-        replyMessage += ` Added **Skira Member** role.`;
+        replyMessage += ' Added **Skira Member** role.';
       }
 
       if (removedSkiraMember) {
-        replyMessage += ` Removed **Skira Member** role.`;
+        replyMessage += ' Removed **Skira Member** role.';
       }
 
       let traineeRowRemoved = false;
+
       if (wasCurrentlyTrainee && traineeRow) {
         await deleteTraineeRow(traineeRow.rowNumber);
         traineeRowRemoved = true;
       }
 
       if (rankKey === 'EX_SKIRA') {
-        const ratingsRowDeleted = await deleteRatingsRowByDiscordId(user.id);
+        const ratingsRowDeleted =
+          await deleteRatingsRowByDiscordId(user.id);
 
         await interaction.editReply({
           content:
             replyMessage +
-            ` Ratings row removed: **${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No existing row found'}**.`,
+            ` Ratings row removed: **${
+              ratingsRowDeleted
+                ? `Yes (row ${ratingsRowDeleted})`
+                : 'No existing row found'
+            }**.`,
           allowedMentions: { users: [] },
         });
 
@@ -747,31 +880,47 @@ module.exports = {
             `**New Rank:** ${selectedRank.label}`,
             `**Breaker Added:** ${breakerName}`,
             `**Squadron Added:** ${squadronName || 'None'}`,
-            `**Auto Assigned Infantry:** ${autoAssignedInfantry ? 'Yes' : 'No'}`,
-            `**Skira Member Removed:** ${removedSkiraMember ? 'Yes' : 'No'}`,
-            `**Ratings Row Removed:** ${ratingsRowDeleted ? `Yes (row ${ratingsRowDeleted})` : 'No'}`,
-            `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
+            `**Auto Assigned Infantry:** ${
+              autoAssignedInfantry ? 'Yes' : 'No'
+            }`,
+            `**Skira Member Removed:** ${
+              removedSkiraMember ? 'Yes' : 'No'
+            }`,
+            `**Ratings Row Removed:** ${
+              ratingsRowDeleted
+                ? `Yes (row ${ratingsRowDeleted})`
+                : 'No'
+            }`,
+            `**Trainee Row Removed:** ${
+              traineeRowRemoved ? 'Yes' : 'No'
+            }`,
             `**Done By:** ${interaction.user.tag}`,
             `**Channel:** <#${interaction.channelId}>`,
           ].join('\n')
         );
+
         return;
       }
 
       let ratingsRow = existingRatingsRow;
       let createdRatingsRow = false;
 
-      const finalSheetName = traineeSheetName || getDisplayNameWithoutRank(member);
+      const finalSheetName =
+        traineeSheetName ||
+        getDisplayNameWithoutRank(member);
+
       const steamId64ForRatings =
         traineeSteamId64 ||
         providedSteamId64 ||
         ratingsSteamId64 ||
         '';
 
-      const rankOrderForRatings = getRankOrder(selectedRank.label);
+      const rankOrderForRatings =
+        getRankOrder(selectedRank.label);
 
       if (!ratingsRow) {
         const newRow = new Array(21).fill('');
+
         newRow[0] = selectedRank.label;
         newRow[1] = squadronName;
         newRow[2] = finalSheetName;
@@ -821,7 +970,9 @@ module.exports = {
       await interaction.editReply({
         content:
           replyMessage +
-          ` SteamID64 moved to Ratings: **${steamId64ForRatings || 'Blank'}**.`,
+          ` SteamID64 moved to Ratings: **${
+            steamId64ForRatings || 'Blank'
+          }**.`,
         allowedMentions: { users: [] },
       });
 
@@ -834,16 +985,26 @@ module.exports = {
           `**New Rank:** ${selectedRank.label}`,
           `**Breaker Added:** ${breakerName}`,
           `**Squadron Added:** ${squadronName || 'None'}`,
-          `**Auto Assigned Infantry:** ${autoAssignedInfantry ? 'Yes' : 'No'}`,
-          `**Skira Member Added:** ${addedSkiraMember ? 'Yes' : 'No'}`,
+          `**Auto Assigned Infantry:** ${
+            autoAssignedInfantry ? 'Yes' : 'No'
+          }`,
+          `**Skira Member Added:** ${
+            addedSkiraMember ? 'Yes' : 'No'
+          }`,
           `**Ratings Sheet Name:** ${RATINGS_SHEET_NAME}`,
           `**Ratings Row:** ${ratingsRow.rowNumber}`,
-          `**Ratings Row Created:** ${createdRatingsRow ? 'Yes' : 'No'}`,
-          `**SteamID64 Written To Ratings:** ${steamId64ForRatings || 'Blank'}`,
+          `**Ratings Row Created:** ${
+            createdRatingsRow ? 'Yes' : 'No'
+          }`,
+          `**SteamID64 Written To Ratings:** ${
+            steamId64ForRatings || 'Blank'
+          }`,
           `**Rank Order Written:** ${rankOrderForRatings}`,
-          `**Ratings Sheet Sorted:** Yes`,
+          '**Ratings Sheet Sorted:** Yes',
           `**Trainee Row Found:** ${traineeRow ? 'Yes' : 'No'}`,
-          `**Trainee Row Removed:** ${traineeRowRemoved ? 'Yes' : 'No'}`,
+          `**Trainee Row Removed:** ${
+            traineeRowRemoved ? 'Yes' : 'No'
+          }`,
           `**Done By:** ${interaction.user.tag}`,
           `**Channel:** <#${interaction.channelId}>`,
         ].join('\n')
@@ -853,7 +1014,8 @@ module.exports = {
 
       try {
         await interaction.editReply({
-          content: '❌ There was an error while running /setrank. Check the console for details.',
+          content:
+            '❌ There was an error while running /setrank. Check the console for details.',
           allowedMentions: { users: [] },
         });
       } catch {}
